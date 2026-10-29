@@ -14,6 +14,7 @@ import { EmptyState } from "@/components/studio/empty-state";
 import { TrackSelect } from "@/components/studio/track-select";
 import { WavePlayer, type RegionRange, type WavePlayerHandle } from "@/components/studio/wave-player";
 import { InlineJob } from "@/components/studio/inline-job";
+import { ExportFormatSelect, useExportFormatDefault, type ExportFormatValue } from "@/components/studio/export-format-select";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -37,6 +38,7 @@ export function CutterView() {
   const [region, setRegion] = useState<RegionRange | null>(null);
   const [startText, setStartText] = useState("");
   const [endText, setEndText] = useState("");
+  const [fmt, setFmt] = useState<ExportFormatValue>(useExportFormatDefault());
 
   // Undo/redo of region edit instructions.
   const historyRef = useRef<{ stack: (RegionRange | null)[]; ptr: number }>({
@@ -128,11 +130,11 @@ export function CutterView() {
       jobsEnqueue(
         "export",
         label,
-        makeTrimTask({ track, startSec: start, endSec: end })
+        makeTrimTask({ track, startSec: start, endSec: end, format: fmt.format, mp3Bitrate: fmt.mp3Bitrate })
       );
       toast.info("Added to processing queue", { description: label });
     },
-    [track, jobsEnqueue]
+    [track, jobsEnqueue, fmt]
   );
 
   const exportSelection = useCallback(() => {
@@ -223,6 +225,7 @@ export function CutterView() {
                     ? `Selected ${(region.end - region.start).toFixed(3)} s — ${formatTimeMs(region.start)} → ${formatTimeMs(region.end)}`
                     : "No selection yet. Drag on the waveform or use I/O keys."}
                 </p>
+                <ExportFormatSelect value={fmt} onChange={setFmt} />
                 <div className="flex flex-wrap items-center gap-2">
                   <Button size="sm" onClick={exportSelection} disabled={!region} className="gap-1.5">
                     <Scissors className="h-3.5 w-3.5" aria-hidden /> Export selection

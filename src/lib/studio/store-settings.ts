@@ -15,6 +15,7 @@ export const DEFAULT_SETTINGS: StudioSettings = {
   theme: "dark",
   accent: "violet",
   exportFormat: "wav16",
+  mp3Bitrate: 192,
   sampleRate: "auto",
   concurrency: 1,
   volume: 0.8,
@@ -30,7 +31,7 @@ interface SettingsStore extends StudioSettings {
 function migrateSettings(persisted: unknown): SettingsJson {
   const validated = validateSettingsJson(persisted);
   if (validated) {
-    // Forward-fill any keys added by newer versions.
+    // Forward-fill any keys added by newer versions (e.g. mp3Bitrate).
     return { ...DEFAULT_SETTINGS, ...validated } as SettingsJson;
   }
   return { ...DEFAULT_SETTINGS } as SettingsJson;

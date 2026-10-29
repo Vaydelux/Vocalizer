@@ -13,11 +13,13 @@ import { toast } from "sonner";
 import { PageHeader } from "@/components/studio/page-header";
 import { EmptyState } from "@/components/studio/empty-state";
 import { TrackSelect } from "@/components/studio/track-select";
+import { WavePlayer } from "@/components/studio/wave-player";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { getTrackById } from "@/lib/studio/store-tracks";
 import { useUi } from "@/lib/studio/store-ui";
 import { useJobs } from "@/lib/studio/store-jobs";
@@ -26,6 +28,13 @@ import { makeBpmTask, makeKeyTask } from "@/lib/studio/tasks";
 import { downloadText } from "@/lib/studio/download";
 import { formatPercent } from "@/lib/studio/format";
 import type { BpmResult, KeyResult } from "@/lib/studio/types";
+
+const PITCHES = ["C", "C♯", "D", "D♯", "E", "F", "F♯", "G", "G♯", "A", "A♯", "B"];
+/** All 24 keys (12 tonics × major/minor) for manual override. */
+const KEY_OPTIONS: string[] = [
+  ...PITCHES.map((p) => `${p} major`),
+  ...PITCHES.map((p) => `${p} minor`),
+];
 
 export function KeyBpmView() {
   const preselected = useUi((s) => s.preselectedTrackId);
@@ -36,7 +45,9 @@ export function KeyBpmView() {
 
   const bpm = useAnalysis((s) => (trackId ? s.bpmByTrack[trackId] : undefined));
   const key = useAnalysis((s) => (trackId ? s.keyByTrack[trackId] : undefined));
+  const manualKey = useAnalysis((s) => (trackId ? s.manualKeyByTrack[trackId] : undefined));
   const setManualBpm = useAnalysis((s) => s.setManualBpm);
+  const setManualKey = useAnalysis((s) => s.setManualKey);
 
   const applyManual = (value: number | null) => {
     if (!trackId) return;
@@ -58,11 +69,13 @@ export function KeyBpmView() {
     const payload: Record<string, unknown> = { file: track.name };
     if (bpm) {
       payload.bpm = bpm.manualBpm ?? bpm.bpm;
-      payload.bpmEstimated = bpm.bpm;
+      payload.bpmDetected = bpm.bpm;
       payload.bpmConfidence = bpm.confidence;
       payload.bpmAlternatives = bpm.alternatives;
     }
-    if (key) payload.key = key.label;
+    if (key) payload.keyDetected = key.label;
+    if (manualKey) payload.manualKey = manualKey;
+    if (key || manualKey) payload.key = manualKey ?? key?.label;
     void navigator.clipboard
       .writeText(JSON.stringify(payload, null, 2))
       .then(() => toast.success("Analysis copied to clipboard"))
@@ -74,12 +87,14 @@ export function KeyBpmView() {
     const payload: Record<string, unknown> = { file: track.name, exportedAt: new Date().toISOString() };
     if (bpm) {
       payload.bpm = bpm.manualBpm ?? bpm.bpm;
-      payload.bpmEstimated = bpm.bpm;
+      payload.bpmDetected = bpm.bpm;
       payload.bpmConfidence = bpm.confidence;
       payload.bpmAlternatives = bpm.alternatives;
       payload.analysisWindow = bpm.windowNote;
     }
-    if (key) payload.key = key;
+    if (key) payload.keyDetected = key;
+    if (manualKey) payload.manualKey = manualKey;
+    if (key || manualKey) payload.key = manualKey ?? key?.label;
     downloadText(JSON.stringify(payload, null, 2), `${track.name.replace(/\.[^.]+$/, "")}_analysis.json`);
   };
 
@@ -112,6 +127,8 @@ export function KeyBpmView() {
       <div className="mb-4 max-w-xl">
         <TrackSelect value={trackId} onChange={setTrackId} ariaLabel="Track to analyze" />
       </div>
+
+      <WavePlayer track={track} height={96} className="mb-4" />
 
       <div className="mb-4 flex flex-wrap gap-2">
         <Button onClick={runBpm} className="gap-1.5">
@@ -231,18 +248,21 @@ export function KeyBpmView() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            {!key ? (
-              <p className="text-sm text-muted-foreground">Not analyzed yet. Run “Detect key”.</p>
+            {!key && !manualKey ? (
+              <p className="text-sm text-muted-foreground">Not analyzed yet. Run “Detect key”, or pick a manual override below.</p>
             ) : (
               <div className="space-y-3">
                 <div className="flex items-baseline gap-3">
-                  <span className="text-4xl font-semibold">{key.label}</span>
+                  <span className="text-4xl font-semibold">{manualKey ?? key?.label ?? "—"}</span>
+                  {manualKey && <Badge variant="outline" className="text-[10px]">manual</Badge>}
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  Profile correlation r = {key.correlation.toFixed(3)} (Krumhansl–Kessler). Correlation
-                  strength is the algorithm’s own measure — not a probability.
-                </p>
-                {key.alternatives.length > 0 && (
+                {key && (
+                  <p className="text-xs text-muted-foreground">
+                    Detected: {key.label} · profile correlation r = {key.correlation.toFixed(3)} (Krumhansl–Kessler).
+                    Correlation strength is the algorithm’s own measure — not a probability.
+                  </p>
+                )}
+                {key && key.alternatives.length > 0 && (
                   <div>
                     <p className="mb-1 text-xs font-medium">Next candidates</p>
                     <div className="flex flex-wrap gap-1.5">
@@ -254,6 +274,40 @@ export function KeyBpmView() {
                     </div>
                   </div>
                 )}
+                <div className="border-t border-border pt-3">
+                  <Label className="text-xs">Manual key override</Label>
+                  <div className="mt-1.5 flex gap-2">
+                    <Select
+                      value={manualKey ?? ""}
+                      onValueChange={(v) => {
+                        if (!trackId) return;
+                        setManualKey(trackId, v);
+                        toast.success(`Manual key set to ${v}`);
+                      }}
+                    >
+                      <SelectTrigger className="w-full" aria-label="Manual key">
+                        <SelectValue placeholder={key ? `Use detected (${key.label})` : "Select a key"} />
+                      </SelectTrigger>
+                      <SelectContent className="studio-scroll max-h-72 overflow-y-auto">
+                        {KEY_OPTIONS.map((k) => (
+                          <SelectItem key={k} value={k}>{k}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {manualKey && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-9 shrink-0 text-xs"
+                        onClick={() => {
+                          if (trackId) setManualKey(trackId, null);
+                        }}
+                      >
+                        Clear
+                      </Button>
+                    )}
+                  </div>
+                </div>
               </div>
             )}
           </CardContent>

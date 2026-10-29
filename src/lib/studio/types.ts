@@ -149,7 +149,8 @@ export interface ValidatedModelManifest {
 /* --------------------------------- settings -------------------------------- */
 
 export type AccentColor = "violet" | "indigo";
-export type ExportFormat = "wav16" | "wav24";
+export type ExportFormat = "wav16" | "wav24" | "mp3";
+export type Mp3Bitrate = 128 | 192 | 256 | 320;
 export type SampleRatePref = "auto" | 44100 | 48000;
 export type FallbackPolicy = "cpu-then-embedded" | "embedded-only" | "error";
 
@@ -157,6 +158,8 @@ export interface StudioSettings {
   theme: "dark" | "light";
   accent: AccentColor;
   exportFormat: ExportFormat;
+  /** Used when exportFormat === "mp3". */
+  mp3Bitrate: Mp3Bitrate;
   sampleRate: SampleRatePref;
   /** Concurrent processing jobs. */
   concurrency: 1 | 2;

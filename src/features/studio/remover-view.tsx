@@ -70,7 +70,7 @@ export function RemoverView() {
               </CardHeader>
               <CardContent className="space-y-3">
                 <Select
-                  value={selectedModel ?? undefined}
+                  value={selectedModel ?? ""}
                   onValueChange={(v) => updateSettings({ preferredModelId: v })}
                   disabled={modelOptions.length === 0}
                 >

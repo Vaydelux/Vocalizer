@@ -20,15 +20,18 @@ export interface StoredKey extends KeyResult {
 interface AnalysisStore {
   bpmByTrack: Record<string, StoredBpm>;
   keyByTrack: Record<string, StoredKey>;
+  manualKeyByTrack: Record<string, string | null>;
   storeBpm: (trackId: string, result: BpmResult) => void;
   storeKey: (trackId: string, result: KeyResult) => void;
   setManualBpm: (trackId: string, bpm: number | null) => void;
+  setManualKey: (trackId: string, key: string | null) => void;
   clear: (trackId: string) => void;
 }
 
 export const useAnalysis = create<AnalysisStore>((set) => ({
   bpmByTrack: {},
   keyByTrack: {},
+  manualKeyByTrack: {},
   storeBpm: (trackId, result) =>
     set((s) => ({ bpmByTrack: { ...s.bpmByTrack, [trackId]: { ...result, analyzedAt: Date.now(), manualBpm: s.bpmByTrack[trackId]?.manualBpm ?? null } } })),
   storeKey: (trackId, result) =>
@@ -39,12 +42,16 @@ export const useAnalysis = create<AnalysisStore>((set) => ({
       if (!existing) return s;
       return { bpmByTrack: { ...s.bpmByTrack, [trackId]: { ...existing, manualBpm: bpm } } };
     }),
+  setManualKey: (trackId, key) =>
+    set((s) => ({ manualKeyByTrack: { ...s.manualKeyByTrack, [trackId]: key } })),
   clear: (trackId) =>
     set((s) => {
       const bpm = { ...s.bpmByTrack };
       const key = { ...s.keyByTrack };
+      const mk = { ...s.manualKeyByTrack };
       delete bpm[trackId];
       delete key[trackId];
-      return { bpmByTrack: bpm, keyByTrack: key };
+      delete mk[trackId];
+      return { bpmByTrack: bpm, keyByTrack: key, manualKeyByTrack: mk };
     }),
 }));

@@ -24,6 +24,7 @@ import { useUi } from "@/lib/studio/store-ui";
 import { useJobs } from "@/lib/studio/store-jobs";
 import { makeJoinTask } from "@/lib/studio/tasks";
 import { useSettings } from "@/lib/studio/store-settings";
+import { ExportFormatSelect, useExportFormatDefault, type ExportFormatValue } from "@/components/studio/export-format-select";
 import { formatBytes, formatTime } from "@/lib/studio/format";
 
 interface Item {
@@ -46,6 +47,7 @@ export function JoinerView() {
   const [crossfade, setCrossfade] = useState(0);
   const [channels, setChannels] = useState<"auto" | "1" | "2">("auto");
   const [jobIds, setJobIds] = useState<string[]>([]);
+  const [fmt, setFmt] = useState<ExportFormatValue>(useExportFormatDefault());
 
   // Single shared preview element — never two at once, torn down on unmount.
   const previewRef = useRef<HTMLAudioElement | null>(null);
@@ -125,12 +127,14 @@ export function JoinerView() {
     const resolved = items.map((i) => getTrackById(i.trackId)!);
     const job = enqueue(
       "export",
-      `Join ${items.length} tracks${crossfade > 0 ? ` · ${crossfade.toFixed(1)}s crossfade` : ""}`,
+      `Join ${items.length} tracks${crossfade > 0 ? ` · ${crossfade.toFixed(1)}s crossfade` : ""} → ${fmt.format.toUpperCase()}`,
       makeJoinTask({
         tracks: resolved,
         crossfadeSec: crossfade,
         sampleRatePref,
         channels: channels === "auto" ? "auto" : channels === "1" ? 1 : 2,
+        format: fmt.format,
+        mp3Bitrate: fmt.mp3Bitrate,
       })
     );
     setJobIds((prev) => [job, ...prev].slice(0, 4));
@@ -289,6 +293,7 @@ export function JoinerView() {
                 </Select>
                 <p className="text-[11px] text-muted-foreground">Sample rate follows Settings → Export.</p>
               </div>
+              <ExportFormatSelect value={fmt} onChange={setFmt} />
 
               <div className="flex items-center justify-between rounded-lg bg-muted/40 p-2.5 text-xs">
                 <span className="text-muted-foreground">Estimated output</span>

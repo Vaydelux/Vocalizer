@@ -34,7 +34,7 @@ export function TrackSelect({
 
   return (
     <Select
-      value={value ?? undefined}
+      value={value ?? ""}
       onValueChange={(v) => onChange(v)}
       disabled={ready.length === 0}
     >

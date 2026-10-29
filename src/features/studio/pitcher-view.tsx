@@ -16,6 +16,7 @@ import { PageHeader } from "@/components/studio/page-header";
 import { EmptyState } from "@/components/studio/empty-state";
 import { TrackSelect } from "@/components/studio/track-select";
 import { InlineJob } from "@/components/studio/inline-job";
+import { ExportFormatSelect, useExportFormatDefault, type ExportFormatValue } from "@/components/studio/export-format-select";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
@@ -39,6 +40,7 @@ export function PitcherView() {
   const [tempo, setTempo] = useState(1);
   const [preserveDuration, setPreserveDuration] = useState(true);
   const [jobIds, setJobIds] = useState<string[]>([]);
+  const [fmt, setFmt] = useState<ExportFormatValue>(useExportFormatDefault());
 
   // Local preview state (rendered on demand, not faked).
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -132,8 +134,8 @@ export function PitcherView() {
     if (!track) return;
     const job = enqueue(
       "export",
-      `Pitch ${semitones >= 0 ? "+" : ""}${semitones}st${cents !== 0 ? ` ${cents >= 0 ? "+" : ""}${cents}c` : ""}${tempo !== 1 ? ` ×${tempo}` : ""} — ${track.name}`,
-      makePitchTask({ track, semitones, cents, tempo, preserveDuration })
+      `Pitch ${semitones >= 0 ? "+" : ""}${semitones}st${cents !== 0 ? ` ${cents >= 0 ? "+" : ""}${cents}c` : ""}${tempo !== 1 ? ` ×${tempo}` : ""} → ${fmt.format.toUpperCase()} — ${track.name}`,
+      makePitchTask({ track, semitones, cents, tempo, preserveDuration, format: fmt.format, mp3Bitrate: fmt.mp3Bitrate })
     );
     setJobIds((prev) => [job, ...prev].slice(0, 3));
     toast.info("Added to processing queue");
@@ -271,6 +273,9 @@ export function PitcherView() {
               <Button onClick={resetAll} variant="ghost" className="gap-1.5" size="sm">
                 <RotateCcw className="h-3.5 w-3.5" aria-hidden /> Reset
               </Button>
+            </div>
+            <div className="border-t border-border pt-4">
+              <ExportFormatSelect value={fmt} onChange={setFmt} />
             </div>
           </CardContent>
         </Card>

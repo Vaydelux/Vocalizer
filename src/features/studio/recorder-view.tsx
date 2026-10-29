@@ -11,6 +11,7 @@ import { Mic, Pause, Play, Square, RefreshCw, Download, Save } from "lucide-reac
 import { toast } from "sonner";
 import { PageHeader } from "@/components/studio/page-header";
 import { InlineJob } from "@/components/studio/inline-job";
+import { ExportFormatSelect, useExportFormatDefault, type ExportFormatValue } from "@/components/studio/export-format-select";
 import { CapabilityBanner } from "@/components/studio/capability-banner";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -38,6 +39,7 @@ export function RecorderView() {
   const rec = useMicRecorder();
   const enqueue = useJobs((s) => s.enqueue);
   const [jobIds, setJobIds] = useState<string[]>([]);
+  const [fmt, setFmt] = useState<ExportFormatValue>(useExportFormatDefault());
 
   const recording = rec.state === "recording";
   const busy = recording || rec.state === "paused";
@@ -54,8 +56,8 @@ export function RecorderView() {
     const file = new File([rec.result.blob], `${rec.result.name}-original.${ext}`, { type: rec.result.mime });
     const job = enqueue(
       "convert",
-      `Convert recording → WAV (${rec.result.name})`,
-      makeConvertTask({ file, friendlyName: rec.result.name })
+      `Convert recording → ${fmt.format.toUpperCase()} (${rec.result.name})`,
+      makeConvertTask({ file, friendlyName: rec.result.name, format: fmt.format, mp3Bitrate: fmt.mp3Bitrate })
     );
     setJobIds((prev) => [job, ...prev].slice(0, 3));
   };
@@ -81,7 +83,7 @@ export function RecorderView() {
             <div className="space-y-1.5">
               <Label className="text-xs">Input device</Label>
               <Select
-                value={rec.selectedDeviceId ?? undefined}
+                value={rec.selectedDeviceId ?? ""}
                 onValueChange={(v) => rec.selectDevice(v)}
                 disabled={busy || rec.devices.length === 0}
               >
@@ -174,10 +176,11 @@ export function RecorderView() {
                   </span>
                 </div>
                 <audio controls src={rec.result.url} className="w-full" preload="metadata" />
+                <ExportFormatSelect value={fmt} onChange={setFmt} />
                 <div className="flex flex-wrap gap-2">
                   <Button size="sm" className="gap-1.5" onClick={exportWav}>
                     <Download className="h-3.5 w-3.5" aria-hidden />
-                    Export as WAV
+                    Export as {fmt.format.toUpperCase()}
                   </Button>
                   <Button size="sm" variant="outline" className="gap-1.5" onClick={saveOriginal}>
                     <Save className="h-3.5 w-3.5" aria-hidden /> Save original ({ext})

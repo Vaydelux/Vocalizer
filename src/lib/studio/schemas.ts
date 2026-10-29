@@ -10,7 +10,8 @@ import { z } from "zod";
 export const settingsSchema = z.object({
   theme: z.enum(["dark", "light"]),
   accent: z.enum(["violet", "indigo"]),
-  exportFormat: z.enum(["wav16", "wav24"]),
+  exportFormat: z.enum(["wav16", "wav24", "mp3"]),
+  mp3Bitrate: z.union([z.literal(128), z.literal(192), z.literal(256), z.literal(320)]),
   sampleRate: z.union([z.literal("auto"), z.literal(44100), z.literal(48000)]),
   concurrency: z.union([z.literal(1), z.literal(2)]),
   volume: z.number().min(0).max(1),

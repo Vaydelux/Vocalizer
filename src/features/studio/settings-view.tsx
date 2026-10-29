@@ -108,14 +108,37 @@ export function SettingsView() {
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label className="text-xs">Export format</Label>
-                <Select value={s.exportFormat} onValueChange={(v) => update({ exportFormat: v as "wav16" | "wav24" })}>
+                <Select
+                  value={s.exportFormat}
+                  onValueChange={(v) => update({ exportFormat: v as "wav16" | "wav24" | "mp3" })}
+                >
                   <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="wav16">WAV · 16-bit PCM</SelectItem>
                     <SelectItem value="wav24">WAV · 24-bit PCM</SelectItem>
+                    <SelectItem value="mp3">MP3 (lamejs)</SelectItem>
                   </SelectContent>
                 </Select>
-                <p className="text-[11px] text-muted-foreground">Compressed encoders arrive with the desktop FFmpeg pipeline.</p>
+                <p className="text-[11px] text-muted-foreground">
+                  MP3 is encoded locally by lamejs. FLAC arrives with the desktop FFmpeg pipeline.
+                </p>
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">MP3 bitrate</Label>
+                <Select
+                  value={String(s.mp3Bitrate)}
+                  onValueChange={(v) => update({ mp3Bitrate: Number(v) as 128 | 192 | 256 | 320 })}
+                  disabled={s.exportFormat !== "mp3"}
+                >
+                  <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="128">128 kbps</SelectItem>
+                    <SelectItem value="192">192 kbps</SelectItem>
+                    <SelectItem value="256">256 kbps</SelectItem>
+                    <SelectItem value="320">320 kbps</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-[11px] text-muted-foreground">Used when the export format is MP3.</p>
               </div>
               <div className="space-y-1.5">
                 <Label className="text-xs">Sample rate</Label>
@@ -165,7 +188,7 @@ export function SettingsView() {
             <div className="space-y-1.5">
               <Label className="text-xs">Preferred model</Label>
               <Select
-                value={s.preferredModelId ?? undefined}
+                value={s.preferredModelId ?? ""}
                 onValueChange={(v) => update({ preferredModelId: v })}
               >
                 <SelectTrigger className="w-full" aria-label="Preferred model">

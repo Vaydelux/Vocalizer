@@ -6,10 +6,10 @@
  * processing queue, off the render path, with honest progress.
  */
 
-import type { JobCtx, JobResultFile } from "./types";
+import type { JobCtx, JobResultFile, ExportFormat, Mp3Bitrate } from "./types";
 import type { AudioTrack } from "./types";
 import { decodeFile } from "./decode";
-import { encodeWav } from "./wav";
+import { encodeAudio } from "./encode";
 import { renderTrim, renderJoin, renderPitch, renderMix, convertChannels } from "./processing";
 import { analyzeBpm, analyzeKey } from "./analysis";
 import { useSettings } from "./store-settings";
@@ -17,37 +17,50 @@ import type { SampleRatePref } from "./types";
 import { useAnalysis } from "./store-analysis";
 import { baseName, sanitizeFileName, timestampSlug } from "./format";
 import { studioError } from "./errors";
-import type { WavBitDepth } from "./wav";
 
-function bitDepth(): WavBitDepth {
-  return useSettings.getState().exportFormat === "wav24" ? 24 : 16;
+interface FormatOverride {
+  format?: ExportFormat;
+  mp3Bitrate?: Mp3Bitrate;
+}
+
+function resolveFormat(override?: FormatOverride): { format: ExportFormat; mp3Bitrate: Mp3Bitrate } {
+  const s = useSettings.getState();
+  return {
+    format: override?.format ?? s.exportFormat,
+    mp3Bitrate: override?.mp3Bitrate ?? s.mp3Bitrate,
+  };
 }
 
 function resolveSampleRate(pref: SampleRatePref, sourceRate: number): number {
   return pref === "auto" ? sourceRate : pref;
 }
 
-function outName(source: string, op: string, ext = "wav"): string {
-  return `${sanitizeFileName(baseName(source))}_${op}_${timestampSlug()}.${ext}`;
+function outName(source: string, op: string): string {
+  // Returns a filename base (no extension); the encoder appends the correct ext.
+  return `${sanitizeFileName(baseName(source))}_${op}_${timestampSlug()}`;
 }
 
 async function encodeStep(
   ctx: JobCtx,
   buffer: AudioBuffer,
-  name: string,
+  nameBase: string,
   fromProgress: number,
-  toProgress: number
+  toProgress: number,
+  override?: FormatOverride
 ): Promise<JobResultFile> {
-  ctx.reportProgress(fromProgress, "Encoding WAV");
-  const blob = await encodeWav(buffer, {
-    bitDepth: bitDepth(),
+  const { format, mp3Bitrate } = resolveFormat(override);
+  const stageLabel = format === "mp3" ? "Encoding MP3" : "Encoding WAV";
+  ctx.reportProgress(fromProgress, stageLabel);
+  const { blob, mime, ext } = await encodeAudio(buffer, {
+    format,
+    mp3Bitrate,
     signal: ctx.signal,
-    onProgress: (p) => ctx.reportProgress(fromProgress + (toProgress - fromProgress) * p, "Encoding WAV"),
+    onProgress: (p) => ctx.reportProgress(fromProgress + (toProgress - fromProgress) * p, stageLabel),
   });
   if (blob.size === 0) {
-    throw studioError("OUTPUT_EMPTY", `Encoded output for ${name} is empty.`);
+    throw studioError("OUTPUT_EMPTY", `Encoded output for ${nameBase} is empty.`);
   }
-  return { name, size: blob.size, url: URL.createObjectURL(blob), mime: "audio/wav" };
+  return { name: `${nameBase}.${ext}`, size: blob.size, url: URL.createObjectURL(blob), mime };
 }
 
 /* ----------------------------------- trim ---------------------------------- */
@@ -56,6 +69,8 @@ export interface TrimTaskInput {
   track: AudioTrack;
   startSec: number;
   endSec: number;
+  format?: ExportFormat;
+  mp3Bitrate?: Mp3Bitrate;
 }
 
 export function makeTrimTask(input: TrimTaskInput) {
@@ -73,7 +88,7 @@ export function makeTrimTask(input: TrimTaskInput) {
       onStage: (stage, p) => ctx.reportProgress(p, stage),
     });
     ctx.log(`Trimmed region: ${(endSec - startSec).toFixed(3)}s → ${rendered.length} samples @ ${targetRate} Hz`);
-    return await encodeStep(ctx, rendered, outName(track.name, "cut"), 0.8, 1);
+    return await encodeStep(ctx, rendered, outName(track.name, "cut"), 0.8, 1, input);
   };
 }
 
@@ -84,6 +99,8 @@ export interface JoinTaskInput {
   crossfadeSec: number;
   sampleRatePref: SampleRatePref;
   channels: 1 | 2 | "auto";
+  format?: ExportFormat;
+  mp3Bitrate?: Mp3Bitrate;
 }
 
 export function makeJoinTask(input: JoinTaskInput) {
@@ -117,7 +134,7 @@ export function makeJoinTask(input: JoinTaskInput) {
     );
     const normalized = await convertChannels(rendered, targetChannels, { signal: ctx.signal });
     ctx.log(`Joined output: ${normalized.duration.toFixed(2)}s`);
-    return await encodeStep(ctx, normalized, outName(tracks.map((t) => baseName(t.name)).join("+"), "join"), 0.75, 1);
+    return await encodeStep(ctx, normalized, outName(tracks.map((t) => baseName(t.name)).join("+"), "join"), 0.75, 1, input);
   };
 }
 
@@ -129,6 +146,8 @@ export interface PitchTaskInput {
   cents: number;
   tempo: number;
   preserveDuration: boolean;
+  format?: ExportFormat;
+  mp3Bitrate?: Mp3Bitrate;
 }
 
 export function makePitchTask(input: PitchTaskInput) {
@@ -149,7 +168,7 @@ export function makePitchTask(input: PitchTaskInput) {
     });
     ctx.log(`Output duration: ${rendered.duration.toFixed(2)}s (source ${buffer.duration.toFixed(2)}s)`);
     const suffix = `pitch${input.semitones >= 0 ? "+" : ""}${input.semitones}${input.tempo !== 1 ? `_x${input.tempo}` : ""}`;
-    return await encodeStep(ctx, rendered, outName(track.name, suffix), 0.85, 1);
+    return await encodeStep(ctx, rendered, outName(track.name, suffix), 0.85, 1, input);
   };
 }
 
@@ -159,14 +178,17 @@ export interface ConvertTaskInput {
   file: File;
   friendlyName: string;
   sampleRateHint?: number;
+  format?: ExportFormat;
+  mp3Bitrate?: Mp3Bitrate;
 }
 
 export function makeConvertTask(input: ConvertTaskInput) {
   return async (ctx: JobCtx): Promise<JobResultFile> => {
-    ctx.log(`Converting ${input.friendlyName} to WAV…`);
+    const fmt = input.format ?? useSettings.getState().exportFormat;
+    ctx.log(`Converting ${input.friendlyName} to ${fmt.toUpperCase()}…`);
     const { buffer } = await decodeFile(input.file, ctx.signal);
     ctx.log(`Decoded: ${buffer.duration.toFixed(2)}s @ ${buffer.sampleRate} Hz, ${buffer.numberOfChannels} ch`);
-    return await encodeStep(ctx, buffer, outName(input.friendlyName, "recording"), 0.2, 1);
+    return await encodeStep(ctx, buffer, outName(input.friendlyName, "recording"), 0.2, 1, input);
   };
 }
 
@@ -178,6 +200,8 @@ export interface MixTaskInput {
   micStartSec: number;
   micGain: number;
   instrumentalGain: number;
+  format?: ExportFormat;
+  mp3Bitrate?: Mp3Bitrate;
 }
 
 export function makeMixTask(input: MixTaskInput) {
@@ -197,7 +221,7 @@ export function makeMixTask(input: MixTaskInput) {
       signal: ctx.signal,
       onStage: (stage, p) => ctx.reportProgress(0.3 + 0.4 * (p ?? 0.5), stage),
     });
-    return await encodeStep(ctx, mixed, outName(input.instrumental.name, "karaoke-mix"), 0.75, 1);
+    return await encodeStep(ctx, mixed, outName(input.instrumental.name, "karaoke-mix"), 0.75, 1, input);
   };
 }
 
@@ -226,7 +250,7 @@ export function makeBpmTask(input: AnalysisTaskInput) {
     );
     const json = JSON.stringify({ track: track.name, ...result }, null, 2);
     const blob = new Blob([json], { type: "application/json" });
-    return { name: outName(track.name, "bpm", "json"), size: blob.size, url: URL.createObjectURL(blob), mime: "application/json" };
+    return { name: `${outName(track.name, "bpm")}.json`, size: blob.size, url: URL.createObjectURL(blob), mime: "application/json" };
   };
 }
 
@@ -245,6 +269,6 @@ export function makeKeyTask(input: AnalysisTaskInput) {
     ctx.log(`Estimated key: ${result.label} (r = ${result.correlation}).`);
     const json = JSON.stringify({ track: track.name, ...result }, null, 2);
     const blob = new Blob([json], { type: "application/json" });
-    return { name: outName(track.name, "key", "json"), size: blob.size, url: URL.createObjectURL(blob), mime: "application/json" };
+    return { name: `${outName(track.name, "key")}.json`, size: blob.size, url: URL.createObjectURL(blob), mime: "application/json" };
   };
 }

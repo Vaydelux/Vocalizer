@@ -108,7 +108,7 @@ export function ModelsView() {
             <div className="space-y-1.5">
               <p className="text-xs font-medium">Preferred model</p>
               <Select
-                value={preferredModelId ?? undefined}
+                value={preferredModelId ?? ""}
                 onValueChange={(v) => updateSettings({ preferredModelId: v })}
               >
                 <SelectTrigger className="w-full" aria-label="Preferred model">

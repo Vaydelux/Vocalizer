@@ -30,6 +30,7 @@ import { useJobs } from "@/lib/studio/store-jobs";
 import { useMicRecorder } from "@/hooks/use-mic-recorder";
 import { parseLrc, activeLrcIndex, type LrcLine } from "@/lib/studio/lrc";
 import { makeMixTask } from "@/lib/studio/tasks";
+import { ExportFormatSelect, useExportFormatDefault, type ExportFormatValue } from "@/components/studio/export-format-select";
 import { downloadResult } from "@/lib/studio/download";
 import { formatTime } from "@/lib/studio/format";
 
@@ -51,6 +52,7 @@ export function KaraokeView() {
   const listRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const performanceStartRef = useRef(0);
+  const [fmt, setFmt] = useState<ExportFormatValue>(useExportFormatDefault());
 
   const onTime = useCallback((t: number) => {
     setCurrentTime(t);
@@ -101,13 +103,15 @@ export function KaraokeView() {
     const file = new File([rec.result.blob], rec.result.name, { type: rec.result.mime });
     const job = enqueue(
       "export",
-      `Mix performance with ${track.name}`,
+      `Mix performance with ${track.name} → ${fmt.format.toUpperCase()}`,
       makeMixTask({
         instrumental: track,
         micFile: file,
         micStartSec: performanceStartRef.current,
         micGain: 1,
         instrumentalGain: 1,
+        format: fmt.format,
+        mp3Bitrate: fmt.mp3Bitrate,
       })
     );
     setJobIds((prev) => [job, ...prev].slice(0, 3));
@@ -293,6 +297,7 @@ export function KaraokeView() {
                   <span className="font-mono">{formatTime(rec.result.durationSec)}</span>
                 </div>
                 <audio controls src={rec.result.url} preload="metadata" className="w-full" />
+                <ExportFormatSelect value={fmt} onChange={setFmt} label="Mix export format" />
                 <div className="flex flex-wrap gap-2">
                   <Button size="sm" variant="outline" className="gap-1.5" onClick={exportTake}>
                     <Save className="h-3.5 w-3.5" aria-hidden /> Save take

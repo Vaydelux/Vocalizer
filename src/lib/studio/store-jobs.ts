@@ -186,12 +186,26 @@ export const useJobs = create<JobStore>((set, get) => ({
     }
   },
   clearFinished: () => {
-    set((s) => ({ jobs: s.jobs.filter((j) => !["completed", "failed", "cancelled"].includes(j.state)) }));
+    set((s) => ({
+      jobs: s.jobs.filter((j) => {
+        if (["completed", "failed", "cancelled"].includes(j.state)) {
+          // Temp-file cleanup: revoke the finalized output's object URL.
+          if (j.result?.url) URL.revokeObjectURL(j.result.url);
+          return false;
+        }
+        return true;
+      }),
+    }));
   },
   removeJob: (id) => {
     if (controllers.has(id)) return; // cannot remove active jobs
     tasks.delete(id);
-    set((s) => ({ jobs: s.jobs.filter((j) => j.id !== id) }));
+    set((s) => ({
+      jobs: s.jobs.filter((j) => {
+        if (j.id === id && j.result?.url) URL.revokeObjectURL(j.result.url);
+        return j.id !== id;
+      }),
+    }));
   },
 }));
 
