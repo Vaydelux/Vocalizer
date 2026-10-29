@@ -1,0 +1,24 @@
+# CPU inference requirements — verified compatible versions.
+# Install into a Python 3.11/3.12 venv:
+#   pip install -r requirements/cpu.txt --extra-index-url https://download.pytorch.org/whl/cpu
+#
+# NOTE: torch is required because audio-separator imports it at module load
+# (even for MDX-Net, which uses onnxruntime for inference). Install the CPU
+# wheel from the PyTorch CPU index to avoid multi-GB CUDA wheels.
+
+audio-separator==0.47.2
+onnxruntime==1.31.1
+torch==2.15.0+cpu
+torchvision==0.29.2+cpu
+onnx2torch>=1.6.0
+julius>=0.2
+ml_collections
+rotary-embedding-torch>=0.6.1,<0.7.0
+numpy
+scipy
+librosa
+pydub
+six
+requests
+tqdm
+soundfile
