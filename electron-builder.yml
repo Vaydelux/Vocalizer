@@ -1,0 +1,40 @@
+# electron-builder configuration — Windows x64 NSIS installer.
+# Bundles FFmpeg/FFprobe from resources/binaries/ via extraResources (asar-unpacked,
+# so they remain real executables on disk). No global Node/Python/FFmpeg required.
+
+appId: io.localaudioaudio.studio
+productName: Local Audio Studio
+copyright: Copyright (c) Local Audio Studio
+directories:
+  output: release
+  buildResources: electron/build
+files:
+  - out/**
+  - electron/preload/build/**
+  - electron/main/build/**
+  - package.json
+extraResources:
+  - from: resources/binaries/
+    to: binaries/
+    filter: ["**/*"]
+asarUnpack:
+  - electron/preload/build/**
+  - electron/main/build/**
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: electron/build/icon.ico
+  artifactName: ${productName}-${version}-${arch}-setup.${ext}
+  # FFmpeg/FFprobe are resolved from process.resourcesPath/binaries at runtime.
+  requestedExecutionLevel: asInvoker
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  deleteAppDataOnUninstall: false
+  artifactName: ${productName}-${version}-${arch}-setup.${ext}
+# Production entry: the compiled main process.
+main: electron/main/build/index.js
+# Code signing is a documented blocker in this environment (no cert).
+# Configure CSC_LINK / CSC_KEY_PASSWORD on a Windows build host before release.

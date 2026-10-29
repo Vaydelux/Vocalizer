@@ -79,6 +79,7 @@ async function runJob(id: string, label: string): Promise<void> {
   appendLog(id, "Job accepted by the processing queue.");
 
   const ctx: JobCtx = {
+    jobId: id,
     signal: ctrl.signal,
     reportProgress: (progress, stage) => {
       patchJob(id, { progress, stage: stage ?? null });

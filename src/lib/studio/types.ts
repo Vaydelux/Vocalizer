@@ -84,6 +84,8 @@ export interface Job {
 }
 
 export interface JobCtx {
+  /** This job's stable id (used for native FFmpeg op + progress filtering). */
+  jobId: string;
   signal: AbortSignal;
   /** progress 0..1, or null → indeterminate. */
   reportProgress: (progress: number | null, stage?: string) => void;

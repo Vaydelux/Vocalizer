@@ -17,6 +17,8 @@ import type { SampleRatePref } from "./types";
 import { useAnalysis } from "./store-analysis";
 import { baseName, sanitizeFileName, timestampSlug } from "./format";
 import { studioError } from "./errors";
+import { isNative } from "./native";
+import { nativeTrimTask, nativeJoinTask, nativePitchTask, nativeConvertTask, nativeMixTask } from "./native-tasks";
 
 interface FormatOverride {
   format?: ExportFormat;
@@ -74,6 +76,12 @@ export interface TrimTaskInput {
 }
 
 export function makeTrimTask(input: TrimTaskInput) {
+  if (isNative()) {
+    return (ctx: JobCtx) => nativeTrimTask(
+      { track: input.track, startSec: input.startSec, endSec: input.endSec, override: { format: input.format, mp3Bitrate: input.mp3Bitrate } },
+      ctx
+    );
+  }
   return async (ctx: JobCtx): Promise<JobResultFile> => {
     const { track, startSec, endSec } = input;
     ctx.log(`Decoding ${track.name}…`);
@@ -104,6 +112,12 @@ export interface JoinTaskInput {
 }
 
 export function makeJoinTask(input: JoinTaskInput) {
+  if (isNative()) {
+    return (ctx: JobCtx) => nativeJoinTask(
+      { tracks: input.tracks, crossfadeSec: input.crossfadeSec, override: { format: input.format, mp3Bitrate: input.mp3Bitrate } },
+      ctx
+    );
+  }
   return async (ctx: JobCtx): Promise<JobResultFile> => {
     const { tracks, crossfadeSec, channels } = input;
     const buffers: AudioBuffer[] = [];
@@ -151,6 +165,12 @@ export interface PitchTaskInput {
 }
 
 export function makePitchTask(input: PitchTaskInput) {
+  if (isNative()) {
+    return (ctx: JobCtx) => nativePitchTask(
+      { track: input.track, semitones: input.semitones, cents: input.cents, tempo: input.tempo, preserveDuration: input.preserveDuration, override: { format: input.format, mp3Bitrate: input.mp3Bitrate } },
+      ctx
+    );
+  }
   return async (ctx: JobCtx): Promise<JobResultFile> => {
     const { track } = input;
     ctx.log(`Decoding ${track.name}…`);
@@ -183,6 +203,12 @@ export interface ConvertTaskInput {
 }
 
 export function makeConvertTask(input: ConvertTaskInput) {
+  if (isNative()) {
+    return (ctx: JobCtx) => nativeConvertTask(
+      { file: input.file, friendlyName: input.friendlyName, override: { format: input.format, mp3Bitrate: input.mp3Bitrate } },
+      ctx
+    );
+  }
   return async (ctx: JobCtx): Promise<JobResultFile> => {
     const fmt = input.format ?? useSettings.getState().exportFormat;
     ctx.log(`Converting ${input.friendlyName} to ${fmt.toUpperCase()}…`);
@@ -205,6 +231,12 @@ export interface MixTaskInput {
 }
 
 export function makeMixTask(input: MixTaskInput) {
+  if (isNative()) {
+    return (ctx: JobCtx) => nativeMixTask(
+      { instrumental: input.instrumental, micFile: input.micFile, micStartSec: input.micStartSec, override: { format: input.format, mp3Bitrate: input.mp3Bitrate } },
+      ctx
+    );
+  }
   return async (ctx: JobCtx): Promise<JobResultFile> => {
     ctx.log(`Decoding instrumental ${input.instrumental.name}…`);
     const inst = await decodeFile(input.instrumental.file, ctx.signal);
