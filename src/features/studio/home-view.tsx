@@ -5,7 +5,7 @@
  * real session stats, and honest format-support chips from the browser.
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { CircleCheck, CircleX, ListMusic, Ellipsis, Scissors, Combine, Music2, KeySquare, MicVocal, Trash2 } from "lucide-react";
 import { PageHeader } from "@/components/studio/page-header";
 import { Dropzone } from "@/components/studio/dropzone";
@@ -16,7 +16,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
 import { useTracks } from "@/lib/studio/store-tracks";
 import { useJobs } from "@/lib/studio/store-jobs";
 import { useUi } from "@/lib/studio/store-ui";
-import { probePlaybackSupport } from "@/lib/studio/decode";
+import { probePlaybackSupport, type PlaybackSupport } from "@/lib/studio/decode";
 import { formatBytes, formatTime } from "@/lib/studio/format";
 import type { AudioTrack } from "@/lib/studio/types";
 
@@ -43,7 +43,18 @@ export function HomeView() {
   const removeTrack = useTracks((s) => s.removeTrack);
   const jobs = useJobs((s) => s.jobs);
   const openTrackWith = useUi((s) => s.openTrackWith);
-  const [support] = useState(() => probePlaybackSupport());
+  const [support, setSupport] = useState<PlaybackSupport[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    // canPlayType probes are browser-only; deferred to avoid SSR and cascading renders.
+    (async () => {
+      await Promise.resolve();
+      if (!cancelled) setSupport(probePlaybackSupport());
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const ready = useMemo(() => tracks.filter((t) => t.status === "ready"), [tracks]);
   const failed = useMemo(() => tracks.filter((t) => t.status === "error"), [tracks]);

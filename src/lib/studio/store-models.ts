@@ -9,11 +9,14 @@
  * protected against removal by design.
  */
 
-import { create } from "zustand";
+import {
+  create,
+} from "zustand";
 import type {
   AdapterRecord,
   BuiltinModelRecord,
   ModelManifestValidation,
+  ValidatedModelManifest,
 } from "./types";
 import { validateModelManifest } from "./schemas";
 
@@ -95,7 +98,7 @@ export const BUILTIN_MODEL: BuiltinModelRecord = {
 };
 
 export interface UserModelRecord {
-  manifest: import("../types").ValidatedModelManifest;
+  manifest: ValidatedModelManifest;
   registeredAt: number;
   /** Always false in this build — a valid manifest never enables inference. */
   inferenceReady: false;
@@ -117,15 +120,18 @@ export const useModels = create<ModelsStore>((set, get) => ({
   userModels: [],
   validations: [],
   validateAndRegister: (raw) => {
-    const result = validateModelManifest(raw);
+    const validated = validateModelManifest(raw);
+    const result: ModelManifestValidation = validated.ok
+      ? { ok: true, manifest: validated.manifest!, validatedAt: Date.now() }
+      : { ok: false, issues: validated.issues, validatedAt: Date.now() };
     set((s) => ({
       validations: [result, ...s.validations].slice(0, 20),
       // Only fully valid manifests with a KNOWN adapter get registered as metadata.
       userModels:
-        result.ok && result.compatibility.adapterKnown
+        result.ok && validated.compatibility.adapterKnown
           ? [
-              ...s.userModels.filter((m) => m.manifest.modelId !== result.manifest.modelId),
-              { manifest: result.manifest, registeredAt: Date.now(), inferenceReady: false },
+              ...s.userModels.filter((m) => m.manifest.modelId !== result.manifest!.modelId),
+              { manifest: result.manifest!, registeredAt: Date.now(), inferenceReady: false },
             ]
           : s.userModels,
     }));

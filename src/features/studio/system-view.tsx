@@ -8,14 +8,20 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
-import { Cpu, Copy, HardDrive, Microphone, MonitorSpeaker, Puzzle, RefreshCw } from "lucide-react";
+import { Cpu, Copy, HardDrive, Mic, MonitorSpeaker, Puzzle, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/studio/page-header";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CapabilityItem } from "@/lib/studio/types";
-import { probePlaybackSupport, probeRecorderMimes, getDecodeContext } from "@/lib/studio/decode";
+import {
+  probePlaybackSupport,
+  probeRecorderMimes,
+  getDecodeContext,
+  type PlaybackSupport,
+  type RecorderMimeSupport,
+} from "@/lib/studio/decode";
 import { useModels } from "@/lib/studio/store-models";
 import { APP_VERSION, APP_MILESTONE } from "@/lib/studio/app-info";
 import { formatBytes } from "@/lib/studio/format";
@@ -63,10 +69,26 @@ export function SystemView() {
   const [audioState, setAudioState] = useState<string>("—");
   const [maxChannels, setMaxChannels] = useState<number | null>(null);
   const [tick, setTick] = useState(0);
+  // Browser-only probes are populated after mount (never during SSR).
+  const [recorderMimes, setRecorderMimes] = useState<RecorderMimeSupport[]>([]);
+  const [playback, setPlayback] = useState<PlaybackSupport[]>([]);
+  const [gpu, setGpu] = useState<{ vendor: string; renderer: string } | null>(null);
+  const [os, setOs] = useState<{ name: string; version: string }>({ name: "—", version: "—" });
+  const [hwCores, setHwCores] = useState<number | null>(null);
+  const [hwMem, setHwMem] = useState<number | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      // Synchronous browser probes (deferred to avoid SSR and render cascades).
+      await Promise.resolve();
+      if (cancelled) return;
+      setRecorderMimes(probeRecorderMimes());
+      setPlayback(probePlaybackSupport());
+      setGpu(gpuInfo());
+      setOs(parseOs(navigator.userAgent));
+      setHwCores(navigator.hardwareConcurrency ?? null);
+      setHwMem((navigator as Navigator & { deviceMemory?: number }).deviceMemory ?? null);
       try {
         const est = await navigator.storage?.estimate?.();
         if (!cancelled && est) setStorage({ usage: est.usage ?? 0, quota: est.quota ?? 0 });
@@ -103,24 +125,17 @@ export function SystemView() {
     };
   }, [tick]);
 
-  const recorderMimes = useMemo(() => probeRecorderMimes(), []);
-  const playback = useMemo(() => probePlaybackSupport(), []);
-  const gpu = useMemo(() => gpuInfo(), []);
-  const os = useMemo(() => parseOs(navigator.userAgent), []);
-
   const hardware: CapabilityItem[] = useMemo(
     () => [
       {
         label: "Logical processors",
-        value: String(navigator.hardwareConcurrency ?? "unknown"),
-        available: navigator.hardwareConcurrency != null,
+        value: hwCores != null ? String(hwCores) : "unknown",
+        available: hwCores != null,
       },
       {
         label: "Device memory (approximate)",
-        value: (navigator as Navigator & { deviceMemory?: number }).deviceMemory
-          ? `≈ ${(navigator as Navigator & { deviceMemory?: number }).deviceMemory!} GB (browser-reported bucket)`
-          : "Not reported by this browser",
-        available: (navigator as Navigator & { deviceMemory?: number }).deviceMemory != null,
+        value: hwMem != null ? `≈ ${hwMem} GB (browser-reported bucket)` : "Not reported by this browser",
+        available: hwMem != null,
         detail: "Browsers report a coarse bucket, not physical RAM.",
       },
       {
@@ -135,7 +150,7 @@ export function SystemView() {
         available: !!storage,
       },
     ],
-    [storage, gpu]
+    [storage, gpu, hwCores, hwMem]
   );
 
   const application: CapabilityItem[] = useMemo(
@@ -196,7 +211,7 @@ export function SystemView() {
     const report = [
       `Local Audio Studio — diagnostic report (sanitized)`,
       `Generated: ${new Date().toISOString()}`,
-      `OS: ${os.name} ${os.version} · UA platform: ${navigator.platform ?? "unknown"}`,
+      `OS: ${os.name} ${os.version} · UA platform: ${typeof navigator !== "undefined" ? (navigator.platform ?? "unknown") : "unknown"}`,
       section("Hardware", hardware),
       section("Application", application),
       section("Audio capabilities", audio),
@@ -295,7 +310,7 @@ export function SystemView() {
       </div>
 
       <p className="mt-4 flex items-center gap-2 text-xs text-muted-foreground">
-        <Microphone className="h-3.5 w-3.5" aria-hidden />
+        <Mic className="h-3.5 w-3.5" aria-hidden />
         Microphone permission state reflects the live Permissions API value and updates on change.
       </p>
     </div>

@@ -8,5 +8,5 @@ export const APP_MILESTONE = "Phase 1 + Phase 2 milestone (web preview runtime)"
 export const RUNTIME_INFO = {
   /** Honest labels: this preview runs in a browser, not Electron. */
   desktop: "N/A in web preview (populated by the Electron build)",
-  engine: "Web Audio API + WaveSurfer v8 (browser decoders)",
+  engine: "Web Audio API + custom canvas waveform renderer + OfflineAudioContext",
 } as const;

@@ -187,7 +187,7 @@ async function resampleChannels(
   const outFrames = Math.max(1, Math.floor(channels[0].length / playRatio));
   const ctx = new OfflineAudioContext(numChannels, outFrames, sourceRate);
   const buffer = ctx.createBuffer(numChannels, channels[0].length, sourceRate);
-  for (let c = 0; c < numChannels; c++) buffer.copyToChannel(channels[c], c);
+  for (let c = 0; c < numChannels; c++) buffer.copyToChannel(channels[c] as Float32Array<ArrayBuffer>, c);
   const src = ctx.createBufferSource();
   src.buffer = buffer;
   src.playbackRate.value = playRatio;
@@ -248,7 +248,7 @@ export async function renderPitch(
 function channelsToBuffer(channels: Float32Array[], sampleRate: number): AudioBuffer {
   const ctx = new OfflineAudioContext(channels.length, channels[0].length, sampleRate);
   const buf = ctx.createBuffer(channels.length, channels[0].length, sampleRate);
-  for (let c = 0; c < channels.length; c++) buf.copyToChannel(channels[c], c);
+  for (let c = 0; c < channels.length; c++) buf.copyToChannel(channels[c] as Float32Array<ArrayBuffer>, c);
   return buf;
 }
 
