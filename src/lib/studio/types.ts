@@ -96,13 +96,66 @@ export type JobTask = (ctx: JobCtx) => Promise<JobResultFile>;
 
 export type ModelAvailability = "available" | "unavailable";
 
+/** Architecture families the registry recognizes (extension ≠ executable). */
+export type ModelArchitecture =
+  | "mdx-net"
+  | "demucs"
+  | "bs-roformer"
+  | "melband-roformer"
+  | "vr-arch"
+  | "generic-onnx"
+  | "custom-pytorch"
+  | "custom-safetensors";
+
+export type ModelFormat = ".onnx" | ".pth" | ".pt" | ".ckpt" | ".safetensors";
+
+export type ModelRuntime =
+  | "onnxruntime-cpu"
+  | "onnxruntime-cuda"
+  | "onnxruntime-directml"
+  | "pytorch-cpu"
+  | "pytorch-cuda"
+  | "pytorch-directml"
+  | "pytorch-mps";
+
+export type DeviceType = "cpu" | "cuda" | "directml" | "mps";
+
+export type ModelStem =
+  | "Vocals"
+  | "Instrumental"
+  | "Drums"
+  | "Bass"
+  | "Guitar"
+  | "Piano"
+  | "Other";
+
+/** Lifecycle of a model record (discriminated). Never inferred from a filename. */
+export type ModelStatus =
+  | "not-installed"
+  | "installed"
+  | "validating"
+  | "ready"
+  | "incompatible"
+  | "corrupted"
+  | "runtime-unavailable"
+  | "unsupported";
+
+export interface ModelCapabilities {
+  supportedStems: ModelStem[];
+  supportedDevices: DeviceType[];
+  supportedOperations: ModelOperation[];
+  supportsBatchProcessing: boolean;
+}
+
+/** Operations the future inference layer will expose. */
+export type ModelOperation = "vocal-removal" | "stem-separation";
+
 export interface AdapterRecord {
   id: string;
   label: string;
-  /** File formats this adapter can load, e.g. ".onnx". */
-  formats: string[];
-  architectures: string[];
-  runtime: string;
+  formats: ModelFormat[];
+  architectures: ModelArchitecture[];
+  runtime: ModelRuntime[];
   /** Real availability — all stubs are honestly unavailable in this build. */
   availability: ModelAvailability;
   reason: string;
@@ -113,14 +166,30 @@ export interface AdapterRecord {
 export interface BuiltinModelRecord {
   id: string;
   name: string;
-  architecture: string;
-  format: string;
+  architecture: ModelArchitecture;
+  format: ModelFormat;
   adapterId: string;
-  supportedStems: string[];
+  supportedStems: ModelStem[];
   status: "not-installed" | "installed";
   protectedBundledResource: true;
   sizeBytes: number;
   note: string;
+}
+
+/** A single model file reference with optional integrity metadata. */
+export interface ModelFile {
+  /** Relative path only; traversal/absolute/drive paths are rejected. */
+  path: string;
+  sha256?: string;
+  sizeBytes?: number;
+}
+
+/** A registered user model — metadata only, never executable in this build. */
+export interface UserModelRecord {
+  manifest: ValidatedModelManifest;
+  registeredAt: number;
+  /** Always false in this build — a valid manifest never enables inference. */
+  inferenceReady: false;
 }
 
 export type ModelManifestValidation =
@@ -132,19 +201,50 @@ export interface ValidatedModelManifest {
   modelId: string;
   displayName: string;
   modelVersion: string;
-  architecture: string;
-  format: string;
+  architecture: ModelArchitecture;
+  format: ModelFormat;
   adapterId: string;
-  requiredRuntime: string;
-  requiredFiles: string[];
-  fileHashes: Record<string, string>;
-  supportedStems: string[];
-  deviceSupport: string[];
-  provenance: string;
+  requiredRuntime: ModelRuntime;
+  origin: "bundled" | "user-imported";
+  supportedStems: ModelStem[];
+  supportedDevices: DeviceType[];
+  files: ModelFile[];
+  provenance?: string;
   license: string;
-  origin: "bundled" | "user-installed";
-  sizeBytes: number;
 }
+
+/** Result of a local model-file inspection (no inference activation). */
+export interface ModelInspectionResult {
+  ok: boolean;
+  fileName: string;
+  format: ModelFormat | null;
+  detectedArchitecture: ModelArchitecture | null;
+  sizeBytes: number;
+  sha256: string | null;
+  associatedConfigs: string[];
+  compatibleAdapterIds: string[];
+  verdict: string;
+  issues: string[];
+}
+
+/* --------------------------- fallback resolution --------------------------- */
+
+export interface ModelResolutionRequest {
+  operation: ModelOperation;
+  requiredStems: ModelStem[];
+  preferredModelId: string | null;
+  /** Requested device; null = "any supported". */
+  device: DeviceType | null;
+}
+
+export type ModelResolution =
+  | { status: "ready"; modelId: string; adapterId: string; runtime: ModelRuntime; device: DeviceType; fallbackUsed: boolean; note: string }
+  | { status: "no-preferred"; reason: string }
+  | { status: "preferred-incompatible"; reason: string; modelId: string }
+  | { status: "runtime-unavailable"; reason: string; modelId: string; adapterId: string }
+  | { status: "device-incompatible"; reason: string; modelId: string }
+  | { status: "no-compatible-model"; reason: string }
+  | { status: "fallback-unavailable"; reason: string };
 
 /* --------------------------------- settings -------------------------------- */
 

@@ -6,7 +6,7 @@
  * No fake stems, no invented results, ever.
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { MicOff, ShieldAlert, FileAudio2 } from "lucide-react";
 import { PageHeader } from "@/components/studio/page-header";
 import { EmptyState } from "@/components/studio/empty-state";
@@ -28,16 +28,35 @@ export function RemoverView() {
 
   const builtin = useModels((s) => s.builtin);
   const userModels = useModels((s) => s.userModels);
-  const isModelUsable = useModels((s) => s.isModelUsable);
+  const resolveFor = useModels((s) => s.resolveFor);
   const preferredModelId = useSettings((s) => s.preferredModelId);
   const updateSettings = useSettings((s) => s.update);
+
+  // Resolve the real availability of the selected model for vocal removal.
+  // Always unavailable in this build — but the reason is derived from the
+  // fallback resolver, not a static string.
+  const [resolutionReason, setResolutionReason] = useState<string>(
+    "Select a model when one becomes available in the Model Manager."
+  );
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const r = await resolveFor({
+        operation: "vocal-removal",
+        requiredStems: ["Vocals", "Instrumental"],
+        preferredModelId: preferredModelId,
+        device: null,
+      });
+      if (!cancelled) setResolutionReason("reason" in r ? r.reason : "Resolved.");
+    })();
+    return () => { cancelled = true; };
+  }, [preferredModelId, resolveFor, userModels.length]);
 
   const modelOptions = [
     { id: builtin.id, name: builtin.name },
     ...userModels.map((m) => ({ id: m.manifest.modelId, name: m.manifest.displayName })),
   ];
   const selectedModel = preferredModelId ?? null;
-  const usability = isModelUsable(selectedModel);
 
   return (
     <div>
@@ -87,7 +106,7 @@ export function RemoverView() {
                 </Select>
                 <p className="flex items-start gap-2 text-xs text-muted-foreground">
                   <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
-                  {selectedModel ? usability.reason : "Select a model when one becomes available in the Model Manager."}
+                  {selectedModel ? resolutionReason : "Select a model when one becomes available in the Model Manager."}
                 </p>
               </CardContent>
             </Card>

@@ -23,6 +23,7 @@ import {
   type RecorderMimeSupport,
 } from "@/lib/studio/decode";
 import { useModels } from "@/lib/studio/store-models";
+import { INFERENCE_ADAPTERS } from "@/lib/studio/adapters";
 import { APP_VERSION, APP_MILESTONE } from "@/lib/studio/app-info";
 import { formatBytes } from "@/lib/studio/format";
 
@@ -192,15 +193,28 @@ export function SystemView() {
   const futureAi: CapabilityItem[] = useMemo(
     () => [
       { label: "Python runtime", value: "Not probed — desktop-build capability", available: null },
-      { label: "ONNX Runtime", value: "Not bundled (adapter registered, stub only)", available: false },
-      { label: "PyTorch runtime", value: "Not bundled (adapter registered, stub only)", available: false },
-      { label: "CUDA / DirectML", value: "Not applicable in web preview; GPU presence ≠ AI backend support", available: false },
+      {
+        label: "ONNX Runtime",
+        value: `Not bundled — ${INFERENCE_ADAPTERS.filter((a) => a.runtimes.some((r) => r.startsWith("onnxruntime"))).length} ONNX adapter(s) registered, all unavailable`,
+        available: false,
+      },
+      {
+        label: "PyTorch runtime",
+        value: `Not bundled — ${INFERENCE_ADAPTERS.filter((a) => a.runtimes.some((r) => r.startsWith("pytorch"))).length} PyTorch adapter(s) registered, all unavailable`,
+        available: false,
+      },
+      { label: "CUDA / DirectML / MPS", value: "Not applicable in web preview; GPU presence ≠ AI backend support", available: false },
+      {
+        label: "Registered adapters",
+        value: `${INFERENCE_ADAPTERS.length} adapter contracts (MDX-Net, VR, Demucs, BS-RoFormer, MelBand, Generic ONNX, Custom PyTorch, Custom Safetensors)`,
+        available: false,
+      },
       {
         label: "Installed models",
         value: `${userModels.length} user-registered · built-in slot: ${builtin.status}`,
         available: false,
       },
-      { label: "Fallback readiness", value: "Not ready — no installed model", available: false },
+      { label: "Fallback readiness", value: "Not ready — no installed model / no runtime", available: false },
     ],
     [userModels.length, builtin.status]
   );
