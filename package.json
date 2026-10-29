@@ -2,7 +2,7 @@
   "name": "local-audio-studio",
   "version": "0.3.0",
   "description": "Offline-first Electron desktop audio studio",
-  "main": "electron/main/build/index.js",
+  "main": "electron/dist/main/index.js",
   "private": true,
   "scripts": {
     "dev": "next dev -p 3000 2>&1 | tee dev.log",
@@ -13,7 +13,7 @@
     "typecheck:electron": "tsc --noEmit -p electron/tsconfig.json",
     "electron:compile": "tsc -p electron/tsconfig.json",
     "electron:dev": "bun run electron:compile && electron .",
-    "electron:build-renderer": "ELECTRON_BUILD=1 next build",
+    "electron:build-renderer": "node scripts/build-renderer.mjs",
     "dist:win": "bun run electron:build-renderer && bun run electron:compile && electron-builder --config electron-builder.yml --win --x64",
     "db:push": "prisma db push --accept-data-loss",
     "db:generate": "prisma generate",

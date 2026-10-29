@@ -1,6 +1,14 @@
 # electron-builder configuration — Windows x64 NSIS installer.
-# Bundles FFmpeg/FFprobe from resources/binaries/ via extraResources (asar-unpacked,
-# so they remain real executables on disk). No global Node/Python/FFmpeg required.
+#
+# Build layout (after `tsc -p electron/tsconfig.json` + `ELECTRON_BUILD=1 next build`):
+#   electron/dist/{main,preload,shared}/*.js   (compiled Electron code)
+#   electron/build/                            (buildResources: icon, etc.)
+#   out/                                       (Next.js static export → renderer)
+#   resources/binaries/{ffmpeg,ffprobe}.exe    (bundled, asar-unpacked)
+#
+# FFmpeg/FFprobe are bundled as extraResources (real executables on disk, not in
+# asar) and resolved at runtime from process.resourcesPath/binaries. No global
+# Node/Python/FFmpeg is required on the user's machine.
 
 appId: io.localaudioaudio.studio
 productName: Local Audio Studio
@@ -8,25 +16,25 @@ copyright: Copyright (c) Local Audio Studio
 directories:
   output: release
   buildResources: electron/build
+# Production entry — the compiled main process.
+main: electron/dist/main/index.js
 files:
   - out/**
-  - electron/preload/build/**
-  - electron/main/build/**
+  - electron/dist/**
   - package.json
 extraResources:
   - from: resources/binaries/
     to: binaries/
     filter: ["**/*"]
+# Preload scripts must be unpacked from asar (sandboxed preloads cannot load from asar).
 asarUnpack:
-  - electron/preload/build/**
-  - electron/main/build/**
+  - electron/dist/preload/**
 win:
   target:
     - target: nsis
       arch: [x64]
   icon: electron/build/icon.ico
   artifactName: ${productName}-${version}-${arch}-setup.${ext}
-  # FFmpeg/FFprobe are resolved from process.resourcesPath/binaries at runtime.
   requestedExecutionLevel: asInvoker
 nsis:
   oneClick: false
@@ -34,7 +42,5 @@ nsis:
   allowToChangeInstallationDirectory: true
   deleteAppDataOnUninstall: false
   artifactName: ${productName}-${version}-${arch}-setup.${ext}
-# Production entry: the compiled main process.
-main: electron/main/build/index.js
-# Code signing is a documented blocker in this environment (no cert).
+# Code signing is a documented blocker (no cert in this environment).
 # Configure CSC_LINK / CSC_KEY_PASSWORD on a Windows build host before release.

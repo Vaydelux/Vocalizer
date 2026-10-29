@@ -52,3 +52,8 @@ prompt
 server.log
 # Skills directory
 /skills/
+# Electron build artifacts
+electron/dist/
+electron/build/*.ico
+release/
+out/

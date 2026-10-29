@@ -107,6 +107,8 @@ export interface NativeSystemInfo {
 /** The typed surface exposed on `window.studio` via contextBridge. */
 export interface StudioNativeApi {
   isNative: true;
+  /** Resolve the real filesystem path of a renderer File selection (Electron webUtils). */
+  getPathForFile(file: File): string;
   openFiles(req?: OpenFilesRequest): Promise<string[]>;
   saveFile(req?: SaveFileRequest): Promise<string | null>;
   openDirectory(req?: { title?: string }): Promise<string | null>;

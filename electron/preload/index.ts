@@ -5,12 +5,16 @@
  * handler on the main side.
  */
 
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, webUtils } from "electron";
 import { IPC } from "../shared/ipc";
 import type { StudioNativeApi } from "../shared/ipc";
 
 const api: StudioNativeApi = {
   isNative: true,
+
+  // Resolve the real filesystem path of a renderer <input type=file> selection.
+  // Uses the Electron webUtils API (the deprecated File.path is avoided).
+  getPathForFile: (file: File) => webUtils.getPathForFile(file),
 
   openFiles: (req) => ipcRenderer.invoke(IPC.DIALOG_OPEN_FILES, req ?? {}),
   saveFile: (req) => ipcRenderer.invoke(IPC.DIALOG_SAVE_FILE, req ?? {}),

@@ -19,15 +19,16 @@ import { native, isNative } from "./native";
 import { baseName, sanitizeFileName, timestampSlug } from "./format";
 import { studioError } from "./errors";
 
-/** Electron extends the browser File with a `path` property (absolute disk path). */
-type ElectronFile = File & { path?: string };
-
+/** Resolve the real disk path of a renderer File selection via the Electron
+ *  webUtils API exposed on window.studio (the deprecated File.path is avoided). */
 function filePath(file: File): string {
-  const p = (file as ElectronFile).path;
+  const api = native();
+  if (!api) throw studioError("CAPABILITY_UNAVAILABLE", "Native API unavailable (web preview).");
+  const p = api.getPathForFile(file);
   if (!p) {
     throw studioError(
       "CAPABILITY_UNAVAILABLE",
-      "The native backend needs a real filesystem path. Re-import the file through the native dialog when running in Electron."
+      "No filesystem path for this File. Re-import it through the native file dialog when running in Electron."
     );
   }
   return p;

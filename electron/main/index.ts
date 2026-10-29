@@ -13,13 +13,31 @@
  * when available, falling back to browser APIs otherwise.
  */
 
-import { app, BrowserWindow, shell, Menu } from "electron";
+import { app, BrowserWindow, shell, Menu, protocol, net } from "electron";
 import * as path from "node:path";
+import { pathToFileURL } from "node:url";
 import { registerIpcHandlers } from "./ipc";
 
 export const isPackaged = app.isPackaged;
 
+// Register the privileged `las://` scheme BEFORE app.ready so it supports
+// fetch, streaming, and secure context (needed to serve the bundled renderer
+// and its /_next/ assets without a dev server).
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: "las",
+    privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, corsEnabled: true },
+  },
+]);
+
 let mainWindow: BrowserWindow | null = null;
+
+/** Directory containing the bundled Next.js static export (the renderer). */
+function rendererDir(): string {
+  // In a packaged build, `out/` is at the asar root (electron-builder `files`).
+  // In dev, it would be the project root `out/` (only present after a static export).
+  return path.join(app.getAppPath(), "out");
+}
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
@@ -50,7 +68,9 @@ function createWindow(): void {
   mainWindow.on("ready-to-show", () => mainWindow?.show());
 
   if (isPackaged) {
-    void mainWindow.loadFile(path.join(__dirname, "..", "..", "out", "index.html"));
+    // Load the renderer through the privileged `las://` protocol so Next.js's
+    // absolute /_next/... asset URLs resolve to bundled files (file:// would break).
+    void mainWindow.loadURL("las://renderer/index.html");
   } else {
     void mainWindow.loadURL("http://localhost:3000");
     mainWindow.webContents.openDevTools({ mode: "detach" });
@@ -69,6 +89,21 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   app.whenReady().then(() => {
+    // Privileged custom protocol: serves bundled static assets under las://renderer/.
+    // Next.js static export uses absolute /_next/... URLs; under file:// these
+    // resolve to the filesystem root and 404. The las:// scheme maps every
+    // request to a real file in the renderer directory, with traversal rejected.
+    protocol.handle("las", (request) => {
+      const u = new URL(request.url);
+      const rel = decodeURIComponent(u.pathname).replace(/^\//, "");
+      const base = rendererDir();
+      const resolved = path.normalize(path.join(base, rel));
+      if (!resolved.startsWith(base)) {
+        return new Response("Forbidden", { status: 403 });
+      }
+      return net.fetch(pathToFileURL(resolved).href);
+    });
+
     registerIpcHandlers(() => mainWindow);
     // A minimal, production-friendly menu (no devtools in packaged builds).
     Menu.setApplicationMenu(
@@ -97,10 +132,10 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
 
-// Harden navigation: only allow loads to the app's own origin or localhost dev.
+// Harden navigation: only allow loads to the app's own origin (las://) or localhost dev.
 app.on("web-contents-created", (_event, contents) => {
   contents.on("will-navigate", (event, url) => {
-    const allowed = url.startsWith("http://localhost:3000") || url.startsWith("file://");
+    const allowed = url.startsWith("las://") || url.startsWith("http://localhost:3000") || url.startsWith("file://");
     if (!allowed) event.preventDefault();
   });
 });
