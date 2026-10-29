@@ -1,59 +1,64 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+# ---------------------------------------------------------------------------
+# Dependencies
+# ---------------------------------------------------------------------------
+node_modules/
+.venv/
+venv/
 
-# dependencies
-node_modules
-/.pnp
-.pnp.*
-.yarn/*
-!.yarn/patches
-!.yarn/plugins
-!.yarn/releases
-!.yarn/versions
+# ---------------------------------------------------------------------------
+# Build output (Next.js renderer, Electron, PyInstaller, installers)
+# ---------------------------------------------------------------------------
+.next/
+out/
+dist/
+release/
 
-# testing
+# ---------------------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------------------
+__pycache__/
+*.pyc
+
+# ---------------------------------------------------------------------------
+# Environment files
+# ---------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+
+# ---------------------------------------------------------------------------
+# Logs
+# ---------------------------------------------------------------------------
+*.log
+
+# ---------------------------------------------------------------------------
+# AI model weights — NEVER commit checkpoints
+#   models/cache/                  runtime download cache (development)
+#   resources/models/downloaded/   runtime-downloaded checkpoints
+#   resources/models/default/      CI-staged bundle model (verification builds)
+# Licensing gate: see inference/models/PROVENANCE.md
+# ---------------------------------------------------------------------------
+models/cache/
+resources/models/downloaded/
+resources/models/default/
+
+# ---------------------------------------------------------------------------
+# Generated Python runtime (PyInstaller onedir output / build dirs)
+# ---------------------------------------------------------------------------
+inference-dist/
+inference/dist/
+inference/build/
+
+# ---------------------------------------------------------------------------
+# Tooling / misc (pre-existing project entries)
+# ---------------------------------------------------------------------------
 /coverage
-
-# next.js
-/.next/
-/out/
-
-# production
-/build
-
-# misc
 .DS_Store
 *.pem
-
-# debug
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-.pnpm-debug.log*
-
-# env files (can opt-in for committing if needed)
-.env*
-
-# vercel
 .vercel
-
-
-# typescript
 *.tsbuildinfo
 next-env.d.ts
 local-*
 .claude
 .z-ai-config
-*.log
-dev.log
-dev.out.log
-test
-prompt
-
-server.log
-# Skills directory
 /skills/
-# Electron build artifacts
-electron/dist/
-electron/build/*.ico
-release/
-out/

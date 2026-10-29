@@ -4,11 +4,23 @@
  * enforces the JSON-over-stdio protocol, routes progress/results/errors, and
  * handles cancellation + shutdown.
  *
- * HONEST STATUS: this manager is fully implemented and type-checked, but the
- * actual Python worker binary (python-audio-separator + PyTorch/ONNX Runtime)
- * is NOT bundled in this repository and cannot be built or run in this Linux
- * sandbox. `isWorkerAvailable()` returns false until the worker is bundled on a
- * Windows build host. No inference is fabricated.
+ * WORKER LAYOUTS (first match wins; availability is detected from disk, never
+ * assumed — no inference is fabricated):
+ *   1. Frozen PyInstaller onedir executable (self-contained; no Python needed).
+ *      - packaged:  <resourcesPath>/inference/inference-worker(.exe)
+ *        (electron-builder extraResources copies inference-dist/windows-x64/
+ *         → resources/inference/ — see electron-builder.yml)
+ *      - dev build: <repo>/inference-dist/windows-x64/inference-worker(.exe)
+ *   2. Script + interpreter:
+ *      - packaged:  <resourcesPath>/inference/worker/worker.py run by
+ *        <resourcesPath>/inference/runtime/python(.exe)
+ *      - dev opt-in: <repo>/inference/worker/main.py run by the interpreter
+ *        named in LAS_INFERENCE_PYTHON (never guessed from PATH).
+ *
+ * HONEST STATUS: no runtime is bundled in this repository, so
+ * `isWorkerAvailable()` returns false in the development sandbox; it can only
+ * return true on a machine where one of the layouts above actually exists
+ * (a Windows packaging host, or a dev box with LAS_INFERENCE_PYTHON set).
  */
 
 import { spawn, type ChildProcess } from "node:child_process";
@@ -22,43 +34,26 @@ import {
 } from "../../shared/inference-protocol";
 import { studioError } from "./errors";
 
-let cachedWorkerPath: string | null | undefined;
+let cachedWorker: ResolvedWorker | null | undefined;
 let cachedRuntimes: string[] | null = null;
 
-/** Resolve the bundled worker entry. Returns null when no worker is bundled. */
-function resolveWorkerPath(): string | null {
-  if (cachedWorkerPath !== undefined) return cachedWorkerPath;
-  const candidates = [
-    // Packaged: resources/inference/worker/worker.py (or a frozen exe)
-    path.join(process.resourcesPath, "inference", "worker", "worker.py"),
-    path.join(process.resourcesPath, "inference", "worker", "worker.exe"),
-    // Dev placeholder (does not exist in this repo)
-    path.join(__dirname, "..", "..", "..", "resources", "inference", "worker", "worker.py"),
-  ];
-  for (const c of candidates) {
-    try {
-      if (fs.existsSync(c)) {
-        cachedWorkerPath = c;
-        return c;
-      }
-    } catch {
-      /* ignore */
-    }
-  }
-  cachedWorkerPath = null;
-  return null;
+interface ResolvedWorker {
+  /** "frozen" = self-contained PyInstaller exe; "script" = interpreter + .py. */
+  mode: "frozen" | "script";
+  /** Executable to spawn. */
+  command: string;
+  /** Extra argv (the script path in script mode; empty in frozen mode). */
+  args: string[];
+  /** Human-readable description for error messages. */
+  label: string;
 }
 
-/** Resolve a bundled Python interpreter, if any. Returns null otherwise. */
-function resolvePythonPath(): string | null {
-  const candidates = [
-    path.join(process.resourcesPath, "inference", "runtime", "python.exe"),
-    path.join(process.resourcesPath, "inference", "runtime", "bin", "python"),
-    path.join(__dirname, "..", "..", "..", "resources", "inference", "runtime", "python.exe"),
-  ];
+const WORKER_EXE = process.platform === "win32" ? "inference-worker.exe" : "inference-worker";
+
+function firstExisting(candidates: string[]): string | null {
   for (const c of candidates) {
     try {
-      if (fs.existsSync(c)) return c;
+      if (c && fs.existsSync(c)) return c;
     } catch {
       /* ignore */
     }
@@ -66,9 +61,53 @@ function resolvePythonPath(): string | null {
   return null;
 }
 
-/** True only when a bundled worker + runtime are actually present on disk. */
+/** Repo root, derived from the compiled file location (electron/dist/main/). */
+function repoRoot(): string {
+  return path.join(__dirname, "..", "..", "..");
+}
+
+/** Layout 1 — frozen onedir executable (packaged app or a local inference-dist build). */
+function resolveFrozenExe(): string | null {
+  const resources = typeof process.resourcesPath === "string" ? process.resourcesPath : null;
+  return firstExisting([
+    ...(resources ? [path.join(resources, "inference", WORKER_EXE)] : []),
+    path.join(repoRoot(), "inference-dist", "windows-x64", WORKER_EXE),
+  ]);
+}
+
+/** Layout 2 — worker script + an explicitly resolvable interpreter. */
+function resolveScriptWorker(): ResolvedWorker | null {
+  const resources = typeof process.resourcesPath === "string" ? process.resourcesPath : null;
+  const script = firstExisting([
+    ...(resources ? [path.join(resources, "inference", "worker", "worker.py")] : []),
+    path.join(repoRoot(), "inference", "worker", "main.py"),
+  ]);
+  if (!script) return null;
+  const pyExe = process.platform === "win32" ? "python.exe" : path.join("bin", "python");
+  const python = firstExisting([
+    // Dev opt-in only — an interpreter is never guessed from PATH.
+    ...(process.env.LAS_INFERENCE_PYTHON ? [process.env.LAS_INFERENCE_PYTHON] : []),
+    ...(resources ? [path.join(resources, "inference", "runtime", pyExe)] : []),
+  ]);
+  if (!python) return null;
+  return { mode: "script", command: python, args: [script], label: `${python} ${script}` };
+}
+
+/** Resolve the worker to spawn. Returns null when no worker is bundled. */
+function resolveWorker(): ResolvedWorker | null {
+  if (cachedWorker !== undefined) return cachedWorker;
+  const frozenExe = resolveFrozenExe();
+  if (frozenExe) {
+    cachedWorker = { mode: "frozen", command: frozenExe, args: [], label: frozenExe };
+    return cachedWorker;
+  }
+  cachedWorker = resolveScriptWorker();
+  return cachedWorker;
+}
+
+/** True only when a worker layout is ACTUALLY present on disk. */
 export function isWorkerAvailable(): boolean {
-  return !!resolveWorkerPath() && !!resolvePythonPath();
+  return resolveWorker() !== null;
 }
 
 interface PendingRequest {
@@ -86,15 +125,14 @@ let stdoutBuffer = "";
 /** Spawn the worker (once) and wait for its `ready` message. */
 async function ensureWorker(): Promise<void> {
   if (workerProc && ready) return;
-  const workerPath = resolveWorkerPath();
-  const pythonPath = resolvePythonPath();
-  if (!workerPath || !pythonPath) {
+  const worker = resolveWorker();
+  if (!worker) {
     throw studioError(
       "RUNTIME_UNAVAILABLE",
-      "No bundled inference worker is present. The Python runtime + python-audio-separator + model weights must be bundled on a Windows build host."
+      "No inference worker is present. Package the PyInstaller onedir worker (inference-dist/windows-x64) on a Windows build host, or set LAS_INFERENCE_PYTHON for script-mode development."
     );
   }
-  workerProc = spawn(pythonPath, [workerPath], { shell: false, windowsHide: true });
+  workerProc = spawn(worker.command, worker.args, { shell: false, windowsHide: true });
   workerProc.stdout?.on("data", (chunk: Buffer) => {
     stdoutBuffer += chunk.toString();
     let nl = stdoutBuffer.indexOf("\n");

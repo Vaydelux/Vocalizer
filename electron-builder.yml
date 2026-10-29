@@ -26,6 +26,16 @@ extraResources:
   - from: resources/binaries/
     to: binaries/
     filter: ["**/*"]
+  # Bundled inference runtime (PyInstaller onedir worker) — built on Windows via
+  # inference/worker/inference-worker.spec. Created by CI/manual packaging.
+  - from: inference-dist/windows-x64/
+    to: inference/
+    filter: ["**/*"]
+  # Protected bundled default model (ONLY after the licensing gate in
+  # inference/models/PROVENANCE.md is cleared — see that file).
+  - from: resources/models/default/
+    to: models/default/
+    filter: ["**/*"]
 # Preload scripts must be unpacked from asar (sandboxed preloads cannot load from asar).
 asarUnpack:
   - electron/dist/preload/**

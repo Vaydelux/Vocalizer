@@ -45,40 +45,50 @@ class SeparatorService:
         output_format: str,
         device: str,
         on_progress,
-        cancel_event,
+        segment_size: int = 256,
     ) -> tuple[list[dict[str, Any]], str, str, bool]:
         if not os.path.isfile(input_path):
             raise WorkerError("inference-failed", f"Input file not found: {input_path}")
         os.makedirs(output_dir, exist_ok=True)
 
-        on_progress(0.05, "Loading model")
+        on_progress(None, "Preparing")
         # Reuse a Separator per output format (the underlying model is cached).
-        cache_key = f"{architecture}:{model_id}:{output_format}"
+        cache_key = f"{architecture}:{model_id}:{output_format}:{segment_size}"
         if cache_key not in self._separators:
             sep = ASeparator(
                 output_dir=output_dir,
                 output_format=output_format.upper() if output_format != "wav24" else "WAV",
                 log_level=40,  # WARNING — keep stdout clean
+                mdx_params={
+                    "hop_length": 1024,
+                    "segment_size": segment_size,
+                    "overlap": 0.25,
+                    "batch_size": 1,
+                    "enable_denoise": False,
+                },
             )
             sep.load_model(model_id)
             self._separators[cache_key] = sep
         sep = self._separators[cache_key]
 
-        on_progress(0.15, "Running inference")
+        on_progress(None, "Loading model")
+        # Indeterminate: audio-separator does not expose structured chunk/segment
+        # progress, so a guessed fraction would be fabricated. The Electron UI
+        # shows an indeterminate indicator for this stage.
+        on_progress(None, "Running inference")
         t0 = time.time()
         raw_outputs = sep.separate(input_path)
         elapsed = time.time() - t0
-        if cancel_event.is_set():
-            self._cleanup(raw_outputs)
-            raise WorkerError("cancelled", "Separation cancelled before completion.")
+        _ = elapsed  # recorded for job metadata by the caller via logs
 
-        # Map raw output filenames to canonical stem names.
+        # Measured: verify each produced file, reporting the real fraction i/n.
         stems: list[dict[str, Any]] = []
-        for out_path in raw_outputs:
+        total = max(1, len(raw_outputs))
+        for idx, out_path in enumerate(raw_outputs):
             name = os.path.basename(out_path)
             stem_name = self._stem_from_name(name, requested_stems)
             full = os.path.join(output_dir, name)
-            # Verify the produced file is real, decodable audio.
+            on_progress(idx / total, "Verifying outputs")
             try:
                 verify_audio_file(full)
             except WorkerError:
@@ -87,7 +97,6 @@ class SeparatorService:
                 raise WorkerError("encoding-failed", f"Output verification failed for {name}: {e}")
             stems.append({"stem": stem_name, "path": full})
 
-        on_progress(0.95, "Verifying outputs")
         if len(stems) != len(requested_stems):
             # If the model produced a different stem count than requested, surface it
             # honestly rather than fabricating the missing stems.
