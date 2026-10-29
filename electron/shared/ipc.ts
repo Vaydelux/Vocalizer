@@ -23,11 +23,15 @@ export const IPC = {
   FFPROBE_METADATA: "ffprobe:metadata",
   FFMPEG_RUN: "ffmpeg:run",
   FFMPEG_CANCEL: "ffmpeg:cancel",
-  FFMPEG_PROGRESS: "ffmpeg:progress", // main → renderer event
+  FFMPEG_PROGRESS: "ffmpeg:progress",
   SETTINGS_GET: "settings:get",
   SETTINGS_SET: "settings:set",
   SYSTEM_INFO: "system:info",
   APP_RESOLVE_PATH: "app:resolvePath",
+  INFERENCE_STATUS: "inference:status",
+  INFERENCE_SEPARATE: "inference:separate",
+  INFERENCE_CANCEL: "inference:cancel",
+  INFERENCE_PROGRESS: "inference:progress",
 } as const;
 
 export type IpcChannel = (typeof IPC)[keyof typeof IPC];
@@ -149,6 +153,48 @@ export interface FfmpegProgress {
 export const cancelRequestSchema = z.object({ jobId: z.string().min(1).max(80) });
 export type CancelRequest = z.infer<typeof cancelRequestSchema>;
 
+/* ------------------------------- inference --------------------------------- */
+
+export const inferenceStatusSchema = z.object({}).optional();
+export interface InferenceStatus {
+  workerAvailable: boolean;
+  runtimes: string[];
+  devices: ("cpu" | "cuda" | "directml")[];
+  defaultModelInstalled: boolean;
+}
+
+export const inferenceSeparateRequestSchema = z.object({
+  jobId: z.string().min(1).max(80),
+  modelId: z.string().min(1).max(120),
+  modelPath: z.string().min(1).max(4096),
+  architecture: z.enum(["mdx-net", "demucs", "bs-roformer", "melband-roformer", "vr-arch", "mdxc"]),
+  configPath: z.string().min(1).max(4096).optional(),
+  inputPath: z.string().min(1).max(4096),
+  outputDir: z.string().min(1).max(4096),
+  requestedStems: z.array(z.enum(["Vocals", "Instrumental", "Drums", "Bass", "Guitar", "Piano", "Other"])).min(1),
+  outputFormat: z.enum(["wav", "wav24", "mp3", "flac"]),
+  device: z.enum(["auto", "cpu", "cuda", "directml"]),
+});
+export type InferenceSeparateRequest = z.infer<typeof inferenceSeparateRequestSchema>;
+
+export interface InferenceStemResult {
+  stem: "Vocals" | "Instrumental" | "Drums" | "Bass" | "Guitar" | "Piano" | "Other";
+  path: string;
+}
+export interface InferenceSeparateResult {
+  jobId: string;
+  stems: InferenceStemResult[];
+  modelUsed: string;
+  deviceUsed: "cpu" | "cuda" | "directml";
+  fallbackUsed: boolean;
+}
+
+export interface InferenceProgress {
+  jobId: string;
+  progress: number | null;
+  stage: string;
+}
+
 /* ------------------------------- settings ---------------------------------- */
 
 export const nativeSettingsSchema = z.object({
@@ -208,6 +254,11 @@ export interface StudioNativeApi {
   runFfmpeg(op: FfmpegOp): Promise<FfmpegResult>;
   cancelFfmpeg(req: CancelRequest): Promise<{ cancelled: boolean }>;
   onFfmpegProgress(cb: (p: FfmpegProgress) => void): () => void;
+  // Inference (AI separation) — honestly unavailable until a worker is bundled.
+  inferenceStatus(): Promise<InferenceStatus>;
+  runInference(req: InferenceSeparateRequest): Promise<InferenceSeparateResult>;
+  cancelInference(req: { jobId: string }): Promise<{ cancelled: boolean }>;
+  onInferenceProgress(cb: (p: InferenceProgress) => void): () => void;
   getSettings(): Promise<NativeSettings>;
   setSettings(patch: Partial<NativeSettings>): Promise<NativeSettings>;
   resolvePath(req: ResolvePathRequest): Promise<ResolvePathResponse>;

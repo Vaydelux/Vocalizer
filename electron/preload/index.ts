@@ -30,6 +30,16 @@ const api: StudioNativeApi = {
     return () => ipcRenderer.removeListener(IPC.FFMPEG_PROGRESS, handler);
   },
 
+  // Inference (AI separation) — honestly unavailable until a worker is bundled.
+  inferenceStatus: () => ipcRenderer.invoke(IPC.INFERENCE_STATUS),
+  runInference: (req) => ipcRenderer.invoke(IPC.INFERENCE_SEPARATE, req),
+  cancelInference: (req) => ipcRenderer.invoke(IPC.INFERENCE_CANCEL, req),
+  onInferenceProgress: (cb) => {
+    const handler = (_e: unknown, p: Parameters<typeof cb>[0]) => cb(p);
+    ipcRenderer.on(IPC.INFERENCE_PROGRESS, handler);
+    return () => ipcRenderer.removeListener(IPC.INFERENCE_PROGRESS, handler);
+  },
+
   getSettings: () => ipcRenderer.invoke(IPC.SETTINGS_GET),
   setSettings: (patch) => ipcRenderer.invoke(IPC.SETTINGS_SET, patch ?? {}),
 

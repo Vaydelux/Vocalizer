@@ -26,6 +26,18 @@ import { runFfmpeg, cancelJob, toMainErrorPayload } from "../services/ffmpeg";
 import { getSettings, setSettings } from "../services/settings";
 import { getFfmpegPath, getFfprobePath, resolvePathKind } from "../services/paths";
 import { studioError } from "../services/errors";
+import {
+  isWorkerAvailable,
+  detectedRuntimes,
+  runSeparation,
+  cancelSeparation,
+  shutdownWorker,
+} from "../services/inference-worker";
+import {
+  inferenceSeparateRequestSchema,
+  type InferenceProgress,
+  type InferenceSeparateResult,
+} from "../../shared/ipc";
 
 /** True only for the renderer's own webContents — defends against cross-window IPC. */
 function assertSender(event: IpcMainInvokeEvent): WebContents {
@@ -115,6 +127,63 @@ export function registerIpcHandlers(_getMainWindow: () => BrowserWindow | null):
       throw new Error(`Invalid settings patch: ${parsed.error.issues.map((i) => i.message).join(", ")}`);
     }
     return setSettings(parsed.data as Partial<NativeSettings>);
+  });
+
+  /* ------------------------------- inference ------------------------------- */
+  ipcMain.handle(IPC.INFERENCE_STATUS, async (event) => {
+    assertSender(event);
+    const runtimes = detectedRuntimes();
+    return {
+      workerAvailable: isWorkerAvailable(),
+      runtimes,
+      devices: ["cpu" as const, ...(runtimes.includes("cuda") ? (["cuda"] as const) : []), ...(runtimes.includes("directml") ? (["directml"] as const) : [])],
+      defaultModelInstalled: false, // updated when a bundled default ships
+    };
+  });
+
+  ipcMain.handle(IPC.INFERENCE_SEPARATE, async (event, raw) => {
+    const sender = assertSender(event);
+    const req = inferenceSeparateRequestSchema.parse(raw);
+    try {
+      const result = await runSeparation({
+        modelId: req.modelId,
+        modelPath: req.modelPath,
+        architecture: req.architecture,
+        configPath: req.configPath,
+        inputPath: req.inputPath,
+        outputDir: req.outputDir,
+        requestedStems: req.requestedStems as string[],
+        outputFormat: req.outputFormat,
+        device: req.device,
+        onProgress: (p) => {
+          if (!sender.isDestroyed()) {
+            const prog: InferenceProgress = { jobId: req.jobId, progress: p.progress, stage: p.stage };
+            sender.send(IPC.INFERENCE_PROGRESS, prog);
+          }
+        },
+      });
+      // The worker returns a `result` response; map it to the IPC result shape.
+      if (result.type === "result") {
+        const res: InferenceSeparateResult = {
+          jobId: req.jobId,
+          stems: result.stems,
+          modelUsed: result.modelUsed,
+          deviceUsed: result.deviceUsed,
+          fallbackUsed: result.fallbackUsed,
+        };
+        return res;
+      }
+      throw toMainErrorPayload(studioError("INFERENCE_FAILED", "Worker returned an unexpected response."));
+    } catch (err) {
+      throw toMainErrorPayload(err);
+    }
+  });
+
+  ipcMain.handle(IPC.INFERENCE_CANCEL, async (event, raw) => {
+    assertSender(event);
+    const req = cancelRequestSchema.parse(raw ?? {});
+    cancelSeparation(req.jobId);
+    return { cancelled: true };
   });
 
   /* --------------------------------- system --------------------------------- */

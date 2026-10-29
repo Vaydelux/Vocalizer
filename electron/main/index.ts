@@ -129,6 +129,8 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 app.on("window-all-closed", () => {
+  // Shut the inference worker down before quitting (no zombie processes).
+  import("./services/inference-worker").then(({ shutdownWorker }) => shutdownWorker());
   if (process.platform !== "darwin") app.quit();
 });
 

@@ -19,6 +19,8 @@ import { getTrackById } from "@/lib/studio/store-tracks";
 import { useUi } from "@/lib/studio/store-ui";
 import { useModels } from "@/lib/studio/store-models";
 import { useSettings } from "@/lib/studio/store-settings";
+import { makeInferenceTask } from "@/lib/studio/inference-task";
+import { useJobs } from "@/lib/studio/store-jobs";
 import { formatTime } from "@/lib/studio/format";
 
 export function RemoverView() {
@@ -31,6 +33,9 @@ export function RemoverView() {
   const resolveFor = useModels((s) => s.resolveFor);
   const preferredModelId = useSettings((s) => s.preferredModelId);
   const updateSettings = useSettings((s) => s.update);
+  const exportFormat = useSettings((s) => s.exportFormat);
+  const mp3Bitrate = useSettings((s) => s.mp3Bitrate);
+  const enqueue = useJobs((s) => s.enqueue);
 
   // Resolve the real availability of the selected model for vocal removal.
   // Always unavailable in this build — but the reason is derived from the
@@ -128,11 +133,30 @@ export function RemoverView() {
                     </div>
                   ))}
                 </div>
-                <Button disabled className="mt-3 w-full">
+                <Button
+                  className="mt-3 w-full gap-1.5"
+                  disabled={!track}
+                  onClick={() => {
+                    if (!track) return;
+                    enqueue(
+                      "export",
+                      `Separate ${track.name} → vocals/instrumental`,
+                      makeInferenceTask({
+                        track,
+                        requestedStems: ["Vocals", "Instrumental"],
+                        preferredModelId,
+                        device: "auto",
+                        outputFormat: exportFormat,
+                        mp3Bitrate,
+                      })
+                    );
+                  }}
+                >
                   Start separation
                 </Button>
                 <p className="mt-2 text-center text-[11px] text-muted-foreground">
-                  Inactive by design — no model, no runtime, no simulated processing.
+                  Runs real AI inference when a model + runtime are installed. Without them, the job
+                  reports an honest “runtime unavailable” error — no stems are fabricated.
                 </p>
               </CardContent>
             </Card>

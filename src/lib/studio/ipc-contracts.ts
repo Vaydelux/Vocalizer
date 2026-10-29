@@ -105,6 +105,29 @@ export interface NativeSystemInfo {
 }
 
 /** The typed surface exposed on `window.studio` via contextBridge. */
+export interface InferenceStemResult {
+  stem: "Vocals" | "Instrumental" | "Drums" | "Bass" | "Guitar" | "Piano" | "Other";
+  path: string;
+}
+export interface InferenceSeparateResult {
+  jobId: string;
+  stems: InferenceStemResult[];
+  modelUsed: string;
+  deviceUsed: "cpu" | "cuda" | "directml";
+  fallbackUsed: boolean;
+}
+export interface InferenceStatus {
+  workerAvailable: boolean;
+  runtimes: string[];
+  devices: ("cpu" | "cuda" | "directml")[];
+  defaultModelInstalled: boolean;
+}
+export interface InferenceProgress {
+  jobId: string;
+  progress: number | null;
+  stage: string;
+}
+
 export interface StudioNativeApi {
   isNative: true;
   /** Resolve the real filesystem path of a renderer File selection (Electron webUtils). */
@@ -116,6 +139,22 @@ export interface StudioNativeApi {
   runFfmpeg(op: FfmpegOp): Promise<FfmpegResult>;
   cancelFfmpeg(req: CancelRequest): Promise<{ cancelled: boolean }>;
   onFfmpegProgress(cb: (p: FfmpegProgress) => void): () => void;
+  // Inference (AI separation) — honestly unavailable until a worker is bundled.
+  inferenceStatus(): Promise<InferenceStatus>;
+  runInference(req: {
+    jobId: string;
+    modelId: string;
+    modelPath: string;
+    architecture: "mdx-net" | "demucs" | "bs-roformer" | "melband-roformer" | "vr-arch" | "mdxc";
+    configPath?: string;
+    inputPath: string;
+    outputDir: string;
+    requestedStems: string[];
+    outputFormat: FfmpegFormat;
+    device: "auto" | "cpu" | "cuda" | "directml";
+  }): Promise<InferenceSeparateResult>;
+  cancelInference(req: { jobId: string }): Promise<{ cancelled: boolean }>;
+  onInferenceProgress(cb: (p: InferenceProgress) => void): () => void;
   getSettings(): Promise<NativeSettings>;
   setSettings(patch: Partial<NativeSettings>): Promise<NativeSettings>;
   resolvePath(req: { kind: ResolvedPathKind }): Promise<string>;

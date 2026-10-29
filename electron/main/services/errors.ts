@@ -15,6 +15,12 @@ export type MainErrorCode =
   | "CAPABILITY_UNAVAILABLE"
   | "PERMISSION_DENIED"
   | "DISK_FULL"
+  | "RUNTIME_UNAVAILABLE"
+  | "INFERENCE_FAILED"
+  | "OUT_OF_MEMORY"
+  | "MODEL_CORRUPTED"
+  | "ARCHITECTURE_UNSUPPORTED"
+  | "DEVICE_UNSUPPORTED"
   | "UNKNOWN";
 
 const MESSAGES: Record<MainErrorCode, string> = {
@@ -29,6 +35,12 @@ const MESSAGES: Record<MainErrorCode, string> = {
   CAPABILITY_UNAVAILABLE: "A required capability or binary is unavailable.",
   PERMISSION_DENIED: "Permission was denied for a file operation.",
   DISK_FULL: "Insufficient disk space to complete the operation.",
+  RUNTIME_UNAVAILABLE: "The required inference runtime is not bundled or could not start.",
+  INFERENCE_FAILED: "AI inference failed.",
+  OUT_OF_MEMORY: "Inference ran out of memory (GPU or CPU).",
+  MODEL_CORRUPTED: "The model file is corrupted or failed integrity verification.",
+  ARCHITECTURE_UNSUPPORTED: "The model architecture is not supported by any registered adapter.",
+  DEVICE_UNSUPPORTED: "The requested device is not supported by the selected model or runtime.",
   UNKNOWN: "An unexpected error occurred.",
 };
 
