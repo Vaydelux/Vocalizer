@@ -1,0 +1,1616 @@
+Local Audio Studio — Enterprise-Grade Electron Desktop Application
+
+1. SYSTEM ROLE AND ENGINEERING DIRECTIVE
+
+You are a senior desktop application architect, full-stack TypeScript engineer, React specialist, Electron security engineer, and digital audio processing developer.
+
+Your responsibility is to design, implement, validate, and maintain a production-oriented, fully local desktop audio application called Local Audio Studio.
+
+Build real, executable application code. Do not deliver a static UI prototype, disconnected components, fabricated data, or buttons that simulate completed functionality.
+
+The application must be maintainable, modular, secure, responsive, testable, and ready for future offline AI audio-processing extensions.
+
+Priority: Complete the Electron foundation and non-AI audio functionality before integrating neural-network models.
+
+2. PROJECT INFORMATION
+
+Application: Local Audio Studio (working name)
+
+Application type: Offline-first desktop audio editing and processing application
+
+Primary platform: Windows 10/11 x64
+
+Future platforms: Linux and macOS, subject to platform-specific validation
+
+Development environment:
+
+Windows and PowerShell
+
+Node.js 24 LTS preferred
+
+npm package management
+
+React with TypeScript
+
+Vite via electron-vite
+
+Electron main, preload, and renderer processes
+
+FFmpeg and FFprobe for local multimedia operations
+
+Python reserved for future AI engines; not required for the initial milestone
+
+Operating principles:
+
+Local-first and privacy-conscious
+
+No mandatory accounts
+
+No cloud uploads
+
+No external database requirement
+
+No internet dependency for ordinary audio processing after required runtime installation
+
+No AI model downloads during the initial phases
+
+No artificial or invented outputs
+
+Graceful handling of unavailable capabilities
+
+Production-grade error reporting and cancellation
+
+Do not assume that the development computer has a particular GPU, RAM capacity, processor, CUDA installation, or available FFmpeg filters. Detect and verify these capabilities.
+
+3. REQUIRED TECHNOLOGY STACK
+
+Use the following technologies unless there is a verified compatibility reason not to.
+
+Desktop runtime
+
+Electron
+
+electron-vite
+
+electron-builder
+
+TypeScript with strict type checking
+
+Frontend
+
+React
+
+Vite
+
+React Router
+
+Tailwind CSS
+
+shadcn/ui
+
+Lucide React
+
+Zustand for lightweight application state
+
+Zod for runtime validation
+
+Audio processing
+
+FFmpeg
+
+FFprobe
+
+WaveSurfer.js with compatible plugins
+
+Web Audio API
+
+MediaRecorder API
+
+Optional Rubber Band-based pitch shifting, subject to bundled runtime compatibility
+
+Essentia.js or another verified local DSP implementation for musical analysis
+
+Testing and engineering
+
+ESLint
+
+Prettier
+
+TypeScript strict mode
+
+Vitest
+
+React Testing Library
+
+Playwright Electron integration testing
+
+Git
+
+Avoid adding redundant dependencies, multiple overlapping state-management libraries, unnecessary database servers, or heavy frameworks without a clear benefit.
+
+Use packages compatible with the installed versions. Do not mix incompatible Tailwind, shadcn/ui, Vite, or Electron configuration patterns.
+
+4. ARCHITECTURAL REQUIREMENTS
+
+Use a clean separation of responsibilities.
+
+Electron main process
+
+Application lifecycle
+
+Window management
+
+Native file dialogs
+
+File-system operations
+
+FFmpeg execution
+
+Background audio job orchestration
+
+Settings persistence
+
+System information
+
+Model registry and future model adapters
+
+IPC request validation
+
+Operating-system integrations
+
+Electron preload
+
+Secure typed API bridge
+
+Explicitly whitelisted methods
+
+Typed event subscriptions
+
+Safe cleanup of listeners
+
+No generic unrestricted Node.js access
+
+React renderer
+
+User interface
+
+Page navigation
+
+Waveform visualization
+
+Playback controls
+
+Accessible interactive components
+
+Job progress and errors
+
+Settings and preferences
+
+Model Manager interface
+
+Shared package
+
+TypeScript types
+
+Zod schemas
+
+Audio metadata contracts
+
+IPC request/response contracts
+
+Processing job definitions
+
+Model manifest and adapter contracts
+
+Heavy operations must not block React rendering or Electron's main event loop.
+
+5. ELECTRON SECURITY REQUIREMENTS
+
+Configure Electron with secure production defaults.
+
+Mandatory:
+
+contextIsolation: true
+
+nodeIntegration: false
+
+sandbox: true for renderer processes
+
+webSecurity: true
+
+Restrictive Content Security Policy
+
+No unrestricted remote content
+
+No arbitrary dynamic code execution
+
+No direct filesystem or process APIs exposed to React
+
+Do not expose raw ipcRenderer, fs, child_process, or unrestricted shell commands to the UI.
+
+Expose only explicitly defined typed methods through contextBridge.
+
+Validate every IPC operation, request payload, and sender. Use Zod schemas or equivalent runtime validation.
+
+Do not execute user-generated command strings. Launch trusted local binaries using argument arrays and shell: false.
+
+Apply appropriate restrictions on external links, new windows, permissions, clipboard operations, and drag-and-drop imports.
+
+Audio files must be treated as potentially untrusted content. Validate file types using supported decoders and metadata probes, not just filename extensions.
+
+6. UI/UX DESIGN REQUIREMENTS
+
+Build a Minimal Premium Desktop Interface.
+
+Design direction:
+
+Dark theme as default
+
+Optional light mode
+
+Neutral charcoal backgrounds
+
+Tasteful violet or indigo accents
+
+Clean spacing and typography
+
+Compact desktop-first controls
+
+Consistent component sizes
+
+Polished interactive states
+
+Smooth but restrained animations
+
+Accessible contrast and keyboard navigation
+
+Responsive support for smaller desktop windows
+
+Do not build an oversized, excessively decorative dashboard.
+
+Use a persistent left sidebar containing:
+
+Home
+
+Remover
+
+Splitter
+
+Pitcher
+
+Key & BPM Finder
+
+Cutter
+
+Joiner
+
+Recorder
+
+Karaoke
+
+Model Manager
+
+Processing Queue
+
+Settings
+
+System Information
+
+The sidebar must be collapsible.
+
+Implement a reusable application shell, page header, audio dropzone, file selector, waveform display, transport controls, progress indicators, empty states, notifications, dialogs, and error displays.
+
+Every visible action must either work or clearly communicate that the capability is not yet implemented.
+
+No misleading clickable placeholders.
+
+7. AUDIO FILE SYSTEM
+
+Create a reusable file-import and audio-metadata subsystem.
+
+Support common formats through the actual available decoder capabilities, including:
+
+MP3
+
+WAV
+
+FLAC
+
+M4A/AAC
+
+OGG
+
+Other FFmpeg-supported audio formats
+
+Features:
+
+Native file picker
+
+Drag-and-drop import
+
+Multiple-file selection
+
+Recent files
+
+Audio metadata extraction
+
+Duration, sample rate, bitrate, channel count, and codec information
+
+File size
+
+Filename and format validation
+
+Missing-file detection
+
+Safe output directory selection
+
+Use FFprobe for authoritative media metadata.
+
+Do not invent unsupported audio metadata.
+
+Preserve original files by default. Editing operations must be non-destructive unless the user explicitly authorizes replacement.
+
+Use stable generated internal IDs for imported tracks and jobs, never pretend these are source-file IDs or actual filesystem identifiers.
+
+8. SHARED AUDIO PLAYER
+
+Create a fully functioning reusable audio player.
+
+Required:
+
+Play and pause
+
+Stop
+
+Seek and scrub
+
+Volume adjustment
+
+Mute and unmute
+
+Current and total time
+
+Waveform visualization
+
+Zoom and timeline
+
+Loop selected region
+
+Keyboard shortcuts
+
+Audio loading and error indicators
+
+Proper teardown when changing files
+
+The player must not create duplicate audio instances or leak event listeners.
+
+Support large files without eagerly duplicating entire decoded audio buffers unnecessarily. Investigate waveform peak generation or caching for large media when appropriate.
+
+Use React component cleanup, typed hooks, and appropriate Web Audio lifecycle management.
+
+9. AUDIO PROCESSING MODULES
+
+9.1 Remover — AI-Ready
+
+Prepare the user interface for vocal and instrumental separation.
+
+Provide:
+
+File import
+
+Model selection interface
+
+Selected model information
+
+Output destination
+
+Vocal and instrumental result slots
+
+Processing progress layout
+
+Do not implement fake separation.
+
+Until a compatible AI engine and model are installed, show:
+
+"Audio separation is not available yet. Install a compatible model when AI processing support is enabled."
+
+Do not show invented vocals or instrumental results.
+
+9.2 Splitter — AI-Ready
+
+Prepare support for:
+
+Two-stem separation
+
+Four-stem separation
+
+Six-stem separation where a future model supports it
+
+Supported stems must come from model metadata rather than assumptions.
+
+Possible stem labels:
+
+Vocals
+
+Instrumental
+
+Drums
+
+Bass
+
+Guitar
+
+Piano
+
+Other
+
+Do not expose unsupported stem outputs as functioning capabilities.
+
+9.3 Pitcher
+
+Implement local pitch and tempo adjustment.
+
+Requirements:
+
+Semitone adjustment
+
+Optional fine adjustment in cents
+
+Tempo controls
+
+Original and processed playback
+
+Reset controls
+
+Export processed audio
+
+Preserve duration when changing pitch, where supported
+
+Prefer a verified Rubber Band integration.
+
+At runtime, check the actual availability of the pitch-shifting engine or FFmpeg filter. Do not assume every FFmpeg build includes the Rubber Band filter.
+
+If a required backend is missing, report the dependency and remediation clearly.
+
+9.4 Key & BPM Finder
+
+Implement genuine offline musical analysis.
+
+Requirements:
+
+Detect estimated BPM
+
+Detect estimated musical key and major/minor scale
+
+Show processing status
+
+Display confidence or uncertainty only when provided by the analysis method
+
+Present possible half-time and double-time BPM alternatives when appropriate
+
+Allow manual correction
+
+Export or copy analysis results
+
+Use verified DSP algorithms, such as those available through Essentia.js.
+
+Results must be computed from the imported audio.
+
+Never display randomly generated BPM values, musical keys, or invented confidence scores.
+
+9.5 Cutter
+
+Build a fully working waveform-based audio cutter.
+
+Requirements:
+
+Visual region selection
+
+Precise start/end time controls
+
+Preview selection
+
+Trim selected audio
+
+Export selected region
+
+Basic split operations
+
+Undo/redo of editing instructions
+
+Non-destructive workflow
+
+Use FFmpeg to produce the actual output.
+
+Account for accurate cutting when codec frame boundaries require decoding and re-encoding.
+
+9.6 Joiner
+
+Build a fully working audio joiner.
+
+Requirements:
+
+Multiple audio imports
+
+Drag-to-reorder
+
+Preview individual files
+
+Combine files in selected order
+
+Optional crossfade
+
+Output format selection
+
+Sample rate and channel normalization when required
+
+Export combined audio
+
+Validate file availability and audio stream compatibility before running jobs.
+
+Do not use lossy stream-copy shortcuts when they would produce invalid joins.
+
+9.7 Recorder
+
+Implement microphone recording using supported local browser APIs.
+
+Required:
+
+Microphone device selection
+
+Permission handling
+
+Start
+
+Pause/resume if supported
+
+Stop
+
+Recording duration
+
+Input level monitoring
+
+Playback recording
+
+Export recording
+
+Handle device disconnection
+
+Clear and retry after permission errors
+
+Use supported MediaRecorder formats and convert with FFmpeg when needed.
+
+Do not assume that the browser can directly record WAV or MP3 in every environment.
+
+Avoid system-audio or loopback-capture features until explicit platform support is implemented and verified.
+
+9.8 Karaoke
+
+Implement a practical first version of the Karaoke workspace.
+
+Required:
+
+Load instrumental audio
+
+Play/pause/seek
+
+Import synchronized LRC lyrics
+
+Display active lyric line
+
+Adjustable lyric timing offset
+
+Optional microphone recording
+
+Export recorded microphone performance
+
+Basic mixing with the instrumental when a verified pipeline is available
+
+Do not claim automatic lyric transcription, automatic synchronization, perfect vocal removal, or advanced real-time vocal effects in the initial release.
+
+Add these capabilities only through real, tested extensions later.
+
+10. PROCESSING ENGINE AND JOB QUEUE
+
+Create a common job-management layer for audio operations.
+
+Supported job states:
+
+Queued
+
+Preparing
+
+Running
+
+Cancelling
+
+Completed
+
+Failed
+
+Cancelled
+
+Implement:
+
+Job identifiers
+
+Operation types
+
+Input/output references
+
+Timestamps
+
+Progress reporting
+
+Cancellation using AbortSignal or equivalent
+
+Child-process termination
+
+Standardized error codes
+
+Local logs
+
+Output verification
+
+Cleanup of temporary files
+
+Configurable concurrency
+
+Safe behavior during application shutdown
+
+Progress must be based on actual processing output where obtainable. If reliable progress cannot be determined, show an indeterminate status instead of fabricated percentages.
+
+Use temporary output files and finalize them only after successful processing.
+
+Do not leave partial files presented as completed exports.
+
+Keep jobs isolated from unrelated page navigation.
+
+11. FUTURE AI MODEL EXTENSION ARCHITECTURE
+
+Build the infrastructure now, but defer actual AI inference.
+
+The system must be capable of supporting multiple model formats through registered compatible inference adapters.
+
+Planned model formats:
+
+.onnx
+
+.ckpt
+
+.pth
+
+.pt
+
+.safetensors
+
+Configuration and metadata formats:
+
+.yaml
+
+.json
+
+These extensions must not automatically imply that the application can execute the model.
+
+Architectures and runtimes must be explicitly compatible.
+
+Prepare adapter contracts for:
+
+ONNX Runtime
+
+PyTorch
+
+Demucs
+
+BS-RoFormer
+
+MelBand RoFormer
+
+MDX-Net
+
+VR Architecture
+
+Future custom model families
+
+Adapters should declare:
+
+Unique adapter identifier
+
+Supported model architectures and formats
+
+Required runtime
+
+Supported device backends
+
+Supported stems and operations
+
+Availability and compatibility validation
+
+Preparation and execution contracts
+
+Cancellation behavior
+
+Structured failure handling
+
+Initial adapters can be typed registrations or non-executable stubs marked not-implemented.
+
+Do not add fake inference functions that return arbitrary audio filenames or successful results.
+
+12. MODEL MANIFEST STANDARD
+
+Define a versioned model manifest schema.
+
+Include:
+
+Schema version
+
+Model ID
+
+Display name
+
+Model version
+
+Architecture
+
+Model format
+
+Adapter ID
+
+Required runtime
+
+Required files
+
+File hashes
+
+Supported stems
+
+Device support
+
+Source or provenance information
+
+Licensing metadata
+
+Installation status
+
+Bundled or user-installed origin
+
+Size in bytes
+
+Validate metadata before accepting it into the registry.
+
+Keep model IDs distinct from model filenames and filesystem paths.
+
+Store user-installed models separately from packaged application resources.
+
+Model architecture must be explicitly declared and checked rather than inferred solely from the file extension.
+
+13. LOCAL MODEL MANAGER
+
+Build a functional registry and management interface.
+
+Initial capabilities:
+
+Display registered model records
+
+Show true installation status
+
+Show model format and architecture
+
+Show disk usage for existing model files
+
+List compatible adapters
+
+Show why a model is incompatible or unavailable
+
+Display the reserved built-in fallback model slot
+
+Persist preferred model selections
+
+Display an empty state when no models are installed
+
+Future capabilities:
+
+Download supported models
+
+Verify cryptographic checksums
+
+Import local model files
+
+Install model dependencies
+
+Remove user-installed models
+
+Download cancellation and recovery
+
+Model-specific inference options
+
+GPU/CPU compatibility checks
+
+Model benchmarking
+
+Automatic fallback
+
+Do not implement arbitrary installation or execution of untrusted Python scripts supplied alongside model files.
+
+For initial development, prepare import-validation interfaces but keep unsupported or unverified imports unavailable for inference.
+
+14. BUILT-IN MODEL AND FALLBACK DESIGN
+
+The completed application will eventually ship with a protected, embedded offline separation model.
+
+Prepare for this requirement now.
+
+The built-in model must:
+
+Be bundled in application resources
+
+Include a compatible inference runtime
+
+Be checksum-verified
+
+Be protected against deletion through the Model Manager
+
+Require no internet connection
+
+Be eligible for fallback only when it supports the requested operation
+
+Suggested eventual default: a verified MDX-Net-compatible ONNX vocal/instrumental model, subject to licensing and compatibility verification.
+
+Do not download or embed this model during the initial development phase.
+
+Until it is installed and working, mark the fallback as unavailable.
+
+Fallback decision order:
+
+Validate the user's preferred model.
+
+Check its installed files and adapter compatibility.
+
+Check the requested operation and stems.
+
+Select a supported device backend.
+
+Attempt processing.
+
+On eligible device failures, retry on CPU when supported.
+
+On eligible model failure, select a compatible embedded default.
+
+Clearly notify the user when fallback occurs.
+
+Prevent infinite retry loops.
+
+Report a real error if no compatible model can process the request.
+
+Never silently convert a requested four-stem operation into two-stem output.
+
+Never present a failed separation as successful.
+
+15. MODEL STORAGE AND PACKAGING
+
+Use platform-appropriate application-data directories for user-installed models, cache, settings, and processing history.
+
+Use process.resourcesPath for packaged binaries and future bundled model resources.
+
+Do not write into app.asar.
+
+Do not rely on development-only filesystem paths in the packaged application.
+
+Support:
+
+Paths containing spaces
+
+Unicode filenames
+
+Long file paths where supported
+
+Read-only application directories
+
+Missing external drives
+
+Limited disk space
+
+Corrupted caches
+
+Interrupted installations
+
+The application must distinguish protected bundled model resources from removable downloaded model resources.
+
+16. SYSTEM INFORMATION AND DIAGNOSTICS
+
+Create a dedicated System Information page.
+
+Display actual detected information:
+
+Operating system
+
+OS name
+
+OS version
+
+Platform
+
+Architecture
+
+Hardware
+
+CPU model and logical processor count
+
+Total physical RAM
+
+Available RAM
+
+GPU information where reported by Electron
+
+Storage availability for the application's data location, where supported
+
+Application
+
+App version
+
+Electron version
+
+Node runtime version
+
+Chromium version
+
+Application data directory
+
+Log directory
+
+Audio capabilities
+
+FFmpeg availability and version
+
+FFprobe availability and version
+
+Supported encoders and decoders required by the app
+
+Rubber Band filter availability
+
+Microphone availability and permission status
+
+Future AI capabilities
+
+Python runtime availability
+
+ONNX Runtime availability
+
+PyTorch runtime availability
+
+CUDA support
+
+Other supported device backends
+
+Installed model count
+
+Selected model
+
+Fallback model readiness
+
+Only show a capability as available after a genuine detection or runtime probe.
+
+Do not interpret GPU presence as proof that CUDA, DirectML, or a particular neural-network architecture is supported.
+
+Allow users to copy a sanitized diagnostic report without exposing personal audio filenames or unnecessary sensitive paths.
+
+17. SETTINGS AND PERSISTENCE
+
+Implement persistent local settings for:
+
+Theme
+
+Accent color
+
+Default export directory
+
+Preferred audio format
+
+Output quality
+
+Default sample rate where appropriate
+
+Audio playback volume
+
+Recent files
+
+Job preferences
+
+Preferred model and fallback policy
+
+Performance settings
+
+Diagnostics preferences
+
+Use an appropriately validated local settings store.
+
+Choose SQLite only if persistent structured relationships, migrations, or large job histories justify it. Do not introduce a database server.
+
+Support corruption recovery and schema migration.
+
+Do not persist sensitive information without a valid reason.
+
+18. ERROR HANDLING
+
+Define typed, meaningful errors for:
+
+Unsupported media
+
+Corrupted file
+
+Missing file
+
+Decoder failure
+
+Encoder failure
+
+Output permission denial
+
+Insufficient disk space
+
+Cancelled operation
+
+Missing binary
+
+Unsupported FFmpeg filter
+
+Microphone permission failure
+
+Recording device disconnect
+
+Invalid model manifest
+
+Missing model files
+
+Model incompatibility
+
+Runtime initialization failure
+
+GPU out-of-memory
+
+Unexpected worker termination
+
+Provide actionable error messages.
+
+Never use an unexplained generic toast as the only indication of a processing failure.
+
+Errors should include safe diagnostic details in local logs and concise explanations in the UI.
+
+19. PROJECT DIRECTORY STRUCTURE
+
+Use a maintainable structure similar to:
+
+local-audio-studio/
+├── src/
+│   ├── main/
+│   │   ├── index.ts
+│   │   ├── windows/
+│   │   ├── ipc/
+│   │   ├── services/
+│   │   │   ├── audio/
+│   │   │   ├── files/
+│   │   │   ├── jobs/
+│   │   │   ├── models/
+│   │   │   ├── settings/
+│   │   │   └── system/
+│   │   └── security/
+│   ├── preload/
+│   │   └── index.ts
+│   ├── renderer/
+│   │   ├── index.html
+│   │   └── src/
+│   │       ├── app/
+│   │       ├── components/
+│   │       ├── features/
+│   │       │   ├── player/
+│   │       │   ├── remover/
+│   │       │   ├── splitter/
+│   │       │   ├── pitcher/
+│   │       │   ├── key-bpm/
+│   │       │   ├── cutter/
+│   │       │   ├── joiner/
+│   │       │   ├── recorder/
+│   │       │   ├── karaoke/
+│   │       │   ├── models/
+│   │       │   └── settings/
+│   │       ├── hooks/
+│   │       ├── lib/
+│   │       └── styles/
+│   └── shared/
+│       ├── contracts/
+│       ├── schemas/
+│       └── types/
+├── resources/
+│   ├── binaries/
+│   └── models/
+├── tests/
+│   ├── unit/
+│   ├── integration/
+│   ├── e2e/
+│   └── fixtures/
+├── build/
+├── docs/
+├── electron.vite.config.ts
+├── electron-builder.yml
+├── package.json
+└── README.md
+
+Adapt this structure when needed to match the real electron-vite entry-point and build configuration.
+
+Do not create unused directories solely to appear comprehensive.
+
+20. TYPESCRIPT AND REACT QUALITY
+
+Use TypeScript strict mode.
+
+Require:
+
+Explicit, meaningful types
+
+No unnecessary any
+
+Discriminated unions for processing states
+
+Validated IPC payloads
+
+Well-defined async return values
+
+Error boundaries
+
+Proper React cleanup
+
+Stable component keys
+
+No state updates after unmount
+
+No duplicate event listeners
+
+No unintended effects
+
+No stale closure bugs
+
+No circular module dependencies
+
+No unsafe type assertions to conceal errors
+
+Use composable React hooks for audio playback, file imports, job subscriptions, and settings.
+
+Keep expensive data processing out of React render functions.
+
+Avoid premature abstraction and overengineering.
+
+Prefer simple, cohesive modules with clear responsibilities.
+
+21. PERFORMANCE REQUIREMENTS
+
+The UI must remain usable during long-running audio operations.
+
+Implement:
+
+Background subprocess execution
+
+Limited task concurrency
+
+Cancellation
+
+Buffer and resource cleanup
+
+Waveform caching when justified
+
+Minimal unnecessary audio decoding
+
+Efficient state updates
+
+Progress event throttling
+
+Virtualized lists when data volume requires them
+
+Memory-aware processing
+
+Startup-time and resource-use measurements
+
+Do not load heavyweight AI frameworks during normal Electron startup.
+
+When AI inference is later added, launch it only when required.
+
+Avoid retaining entire decoded audio files in renderer memory longer than necessary.
+
+22. PACKAGING AND OFFLINE DISTRIBUTION
+
+Use electron-builder to produce a Windows x64 installer.
+
+Requirements:
+
+Correct Windows application metadata
+
+Application icon
+
+Install/uninstall support
+
+Bundled FFmpeg and FFprobe
+
+Valid production resource paths
+
+Read/write separation
+
+Application-data persistence
+
+No dependency on globally installed FFmpeg for end users
+
+Safe executable invocation
+
+Installer smoke tests
+
+Reserve packaging locations for the eventual AI runtime and embedded model without including them in the initial build.
+
+Review licenses and redistribution terms for FFmpeg, codecs, fonts, libraries, model weights, and other bundled components.
+
+Code signing and automatic updates can be configured later, but document them as release requirements.
+
+23. AUTOMATED TESTING
+
+Create meaningful automated tests.
+
+Unit tests
+
+Audio metadata transformations
+
+Time and sample conversions
+
+Input validation
+
+Output path validation
+
+Model manifest validation
+
+Adapter compatibility rules
+
+Fallback decisions
+
+Job state transitions
+
+Settings migration
+
+Integration tests
+
+FFmpeg execution
+
+FFprobe parsing
+
+File imports and exports
+
+Cutter output
+
+Joiner output
+
+Pitch processing when available
+
+Job cancellation
+
+Temporary-file cleanup
+
+Corrupted input handling
+
+Electron tests
+
+Application starts
+
+Renderer loads
+
+Navigation works
+
+Secure preload API is available
+
+Unsafe Node APIs are not available to the renderer
+
+Native file picker works
+
+Imported files produce real metadata
+
+Audio playback works
+
+No unexpected uncaught exceptions
+
+Production tests
+
+Packaged installer launches
+
+Bundled binaries are found
+
+Audio operations work without internet
+
+User settings persist
+
+No development-server dependency exists
+
+Resources load correctly from packaged paths
+
+Use small, properly licensed test audio fixtures or programmatically generated tones and signals.
+
+Tests must validate generated audio files, not just the existence of a success notification.
+
+24. DEVELOPMENT PHASES
+
+Follow this implementation order.
+
+Phase 1 — Electron Foundation
+
+Scaffold working Electron + React + TypeScript application
+
+Configure security
+
+Implement typed preload API
+
+Establish shared contracts
+
+Build application shell
+
+Add navigation
+
+Add themes and settings
+
+Implement local file import
+
+Add basic diagnostics
+
+Verify development and production builds
+
+Phase 2 — Core Audio
+
+FFmpeg/FFprobe integration
+
+Metadata extraction
+
+Reusable waveform player
+
+Cutter
+
+Joiner
+
+Audio export
+
+Processing queue
+
+Real progress and cancellation
+
+Phase 3 — Audio Utilities
+
+Pitcher
+
+Key/BPM Finder
+
+Recorder
+
+Basic karaoke
+
+Audio-processing enhancements
+
+Phase 4 — Model Extension Preparation
+
+Manifest schemas
+
+Model registry
+
+Model Manager
+
+Storage accounting
+
+Adapter contracts
+
+Capability detection
+
+Fallback policy interfaces
+
+Compatibility tests
+
+No real model downloads or inference
+
+Phase 5 — AI Integration (Deferred)
+
+Embedded default model
+
+Bundled compatible inference runtime
+
+Demucs adapter
+
+RoFormer adapters
+
+MDX-Net integration
+
+Optional model installation
+
+Actual CPU/GPU execution
+
+Automatic fallback
+
+Full offline AI testing
+
+Do not begin Phase 5 until explicitly authorized.
+
+25. INITIAL EXECUTION INSTRUCTIONS
+
+Start by implementing Phase 1 as a working, buildable Electron application.
+
+Then implement the first essential audio-processing milestone from Phase 2:
+
+Import audio
+
+Display real metadata
+
+Play imported audio
+
+Render waveform
+
+Select audio region
+
+Cut/export a region
+
+Join/export multiple audio files
+
+Prepare shared architectural contracts for later phases where necessary, but do not build speculative engines.
+
+Stop at the milestone boundary and perform a complete implementation audit.
+
+Do not start subsequent phases automatically.
+
+26. DEFINITION OF DONE
+
+A feature is complete only when:
+
+Its actual implementation exists.
+
+Its controls work.
+
+It performs the advertised operation.
+
+Success and failure states are handled.
+
+Its types compile.
+
+Relevant tests pass.
+
+There are no known broken imports.
+
+It works in the intended environment.
+
+Its limitations are documented.
+
+The completed output has been validated.
+
+A polished visual appearance alone is not completion.
+
+An unimplemented AI operation must remain visibly unavailable.
+
+27. IMPLEMENTATION AND REPORTING RULES
+
+When working inside the repository:
+
+Inspect the current project before modifying files.
+
+Preserve working code and existing project conventions.
+
+Implement complete, connected functionality.
+
+Avoid duplicating utilities and state.
+
+Do not silently replace working behavior with mock data.
+
+Do not invent APIs, packages, or file paths.
+
+Verify library documentation when API compatibility is uncertain.
+
+Avoid unrelated refactoring.
+
+Prefer small, reviewable changes.
+
+Add tests alongside implementation.
+
+Do not claim commands were run if they were not executed.
+
+Report failures and unresolved blockers accurately.
+
+At the end of each milestone, provide:
+
+Implementation summary
+
+Features implemented
+
+Files created or modified
+
+Architecture decisions
+
+Security decisions
+
+Verification report
+
+Commands actually executed
+
+TypeScript results
+
+Lint results
+
+Test results
+
+Build results
+
+Packaging results if performed
+
+Remaining work
+
+Known issues
+
+Blockers
+
+Missing optional dependencies
+
+Manual setup requirements
+
+Next development phase
+
+Do not declare production readiness while required acceptance tests remain unexecuted or failing.
+
+28. REQUIRED DEVELOPMENT COMMANDS
+
+Provide working npm scripts appropriate to the selected electron-vite configuration.
+
+The project should expose:
+
+npm run dev
+npm run lint
+npm run typecheck
+npm run test
+npm run test:e2e
+npm run build
+npm run dist:win
+
+Create these scripts with real implementations. Do not assume that template-generated scripts already have the required names.
+
+Also document:
+
+Initial project setup
+
+Windows PowerShell commands
+
+Development launch
+
+FFmpeg installation for development
+
+Testing
+
+Production packaging
+
+Debugging
+
+Artifact locations
+
+29. FINAL ENGINEERING PRINCIPLE
+
+Build an application that is genuinely usable before neural-network processing is added.
+
+Maintain extensibility without implementing unnecessary complexity.
+
+Prioritize:
+
+Correctness
+
+Security
+
+Functional audio processing
+
+Responsiveness
+
+Reliability
+
+Maintainability
+
+Audio quality
+
+User experience
+
+Future AI model compatibility
+
+The finished architecture must allow adding different compatible model families without rewriting the Electron application.
+
+However, model formats, architecture compatibility, inference implementations, and hardware requirements must always be validated explicitly.
+
+Begin implementation with Phase 1 and the first essential audio milestone of Phase 2. Produce actual working source code, test it, and report the results.
