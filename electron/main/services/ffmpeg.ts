@@ -144,7 +144,18 @@ export function cancelJob(jobId: string): boolean {
   try {
     if (process.platform === "win32") {
       // Windows: kill the whole tree via taskkill (FFmpeg may spawn children).
-      spawn("taskkill", ["/PID", String(handle.proc.pid), "/T", "/F"], { shell: false, windowsHide: true });
+      if (handle.proc.pid) {
+        const killer = spawn("taskkill", ["/PID", String(handle.proc.pid), "/T", "/F"], {
+          shell: false, windowsHide: true, stdio: "ignore",
+        });
+        killer.once("error", () => {
+          // On restricted hosts, try stopping the parent rather than crashing
+          // the entire Electron main process on an unhandled spawn error.
+          try { handle.proc.kill(); } catch { /* already exited */ }
+        });
+      } else {
+        try { handle.proc.kill(); } catch { /* already exited */ }
+      }
     } else {
       handle.proc.kill("SIGTERM");
       setTimeout(() => {
