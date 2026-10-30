@@ -11,8 +11,10 @@ on:
         description: "Create/update a GitHub DRAFT prerelease (never auto-publish)"
         type: boolean
         default: false
+  pull_request:
+    branches: [main]
   push:
-    branches: [main, phase4/stability-recovery]
+    branches: [main]
 
 permissions:
   contents: read
@@ -67,17 +69,52 @@ jobs:
       - name: Acquire FFmpeg and FFprobe for preview
         shell: pwsh
         run: |
-          choco install ffmpeg --yes --no-progress
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $package = Join-Path $env:ChocolateyInstall "lib/ffmpeg"
-          $ffmpeg = Get-ChildItem $package -Filter ffmpeg.exe -Recurse | Select-Object -First 1
-          $ffprobe = Get-ChildItem $package -Filter ffprobe.exe -Recurse | Select-Object -First 1
-          if (!$ffmpeg -or !$ffprobe) { throw "FFmpeg and FFprobe not found after installation" }
+          # Chocolatey's community feed can return intermittent HTTP 504.
+          # Prefer an already installed matching binary pair; otherwise retry
+          # the same package instead of accepting arbitrary unverified URLs.
+          $ErrorActionPreference = "Stop"
+          function Find-FfmpegPair {
+            $candidates = @()
+            $package = Join-Path $env:ChocolateyInstall "lib/ffmpeg"
+            if (Test-Path -LiteralPath $package) {
+              $candidates += Get-ChildItem $package -Filter ffmpeg.exe -File -Recurse -ErrorAction SilentlyContinue |
+                Select-Object -ExpandProperty FullName
+            }
+            $fromPath = Get-Command ffmpeg.exe -ErrorAction SilentlyContinue
+            if ($fromPath) { $candidates += $fromPath.Source }
+            foreach ($candidate in $candidates) {
+              $sibling = Join-Path (Split-Path $candidate -Parent) "ffprobe.exe"
+              if ((Test-Path -LiteralPath $candidate -PathType Leaf) -and
+                  (Test-Path -LiteralPath $sibling -PathType Leaf)) {
+                return @($candidate, $sibling)
+              }
+            }
+            return @()
+          }
+          $pair = @(Find-FfmpegPair)
+          if ($pair.Count -ne 2) {
+            for ($attempt = 1; $attempt -le 3; $attempt++) {
+              Write-Host "Installing FFmpeg via Chocolatey (attempt $attempt/3)"
+              choco install ffmpeg --yes --no-progress
+              $exit = $LASTEXITCODE
+              $pair = @(Find-FfmpegPair)
+              if ($pair.Count -eq 2) { break }
+              Write-Warning "Chocolatey FFmpeg acquisition failed (exit code $exit)."
+              if ($attempt -lt 3) { Start-Sleep -Seconds (10 * $attempt) }
+            }
+          }
+          if ($pair.Count -ne 2) {
+            throw "Could not acquire a matching FFmpeg/FFprobe binary pair after retries."
+          }
           New-Item -ItemType Directory -Force resources/binaries | Out-Null
-          Copy-Item $ffmpeg.FullName resources/binaries/ffmpeg.exe
-          Copy-Item $ffprobe.FullName resources/binaries/ffprobe.exe
-          & resources/binaries/ffprobe.exe -version
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Copy-Item -LiteralPath $pair[0] -Destination resources/binaries/ffmpeg.exe -Force
+          Copy-Item -LiteralPath $pair[1] -Destination resources/binaries/ffprobe.exe -Force
+          & resources/binaries/ffmpeg.exe -version | Select-Object -First 1
+          if ($LASTEXITCODE -ne 0) { throw "The selected FFmpeg binary failed validation" }
+          & resources/binaries/ffprobe.exe -version | Select-Object -First 1
+          if ($LASTEXITCODE -ne 0) { throw "The selected FFprobe binary failed validation" }
+          Get-FileHash resources/binaries/ffmpeg.exe -Algorithm SHA256 | Format-List
+          Get-FileHash resources/binaries/ffprobe.exe -Algorithm SHA256 | Format-List
       - name: Prepare preview icon
         run: python scripts/create-preview-icon.py
       - name: Record stable UTC build date
