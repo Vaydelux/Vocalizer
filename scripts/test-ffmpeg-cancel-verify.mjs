@@ -12,11 +12,17 @@ import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
 const childProcess = require("node:child_process");
-const paths = require("../electron/dist/main/services/paths.js");
-const ffprobe = require("../electron/dist/main/services/ffprobe.js");
+// The genuine path resolver imports Electron's main process at module load.
+// Mock these two dependencies in Node's module cache BEFORE requiring FFmpeg.
+const pathsPath = require.resolve("../electron/dist/main/services/paths.js");
+const probePath = require.resolve("../electron/dist/main/services/ffprobe.js");
+const previousPaths = require.cache[pathsPath];
+const previousProbe = require.cache[probePath];
+const pathsStub = { getFfmpegPath: () => "test-ffmpeg" };
+const probeStub = { probeFile: async () => ({ duration:2 }) };
+require.cache[pathsPath] = { id:pathsPath, filename:pathsPath, loaded:true, exports:pathsStub };
+require.cache[probePath] = { id:probePath, filename:probePath, loaded:true, exports:probeStub };
 const originalSpawn = childProcess.spawn;
-const originalGetFfmpegPath = paths.getFfmpegPath;
-const originalProbeFile = ffprobe.probeFile;
 const folder = fs.mkdtempSync(path.join(os.tmpdir(), "vocalizer-cancel-race-"));
 let releaseProbe;
 let enteredProbe;
@@ -24,8 +30,7 @@ const probeStarted = new Promise((resolve) => { enteredProbe = resolve; });
 const metadata = {duration:2, sampleRate:44100, channels:1, codec:"pcm_s16le", format:"wav", bitrateKbps:700, sizeBytes:12};
 
 try {
-  paths.getFfmpegPath = () => "test-ffmpeg";
-  ffprobe.probeFile = (filePath) => {
+  probeStub.probeFile = (filePath) => {
     if (path.basename(filePath).startsWith(".vocalizer-partial-")) {
       enteredProbe();
       return new Promise((resolve) => { releaseProbe = () => resolve(metadata); });
@@ -64,7 +69,7 @@ try {
     "Completed cancellation must remove the native registry entry");
 
   // A non-cancelled operation still verifies and publishes normally.
-  ffprobe.probeFile = async () => metadata;
+  probeStub.probeFile = async () => metadata;
   const successTarget = path.join(folder, "completed.wav");
   const completed = await runFfmpeg({...operation,jobId:"complete-1",outputPath:successTarget}, () => {});
   assert.equal(completed.verified, true);
@@ -73,7 +78,9 @@ try {
   console.log("PASS: native cancellation remains effective through verification, then cleans up");
 } finally {
   childProcess.spawn = originalSpawn;
-  paths.getFfmpegPath = originalGetFfmpegPath;
-  ffprobe.probeFile = originalProbeFile;
+  if (previousPaths) require.cache[pathsPath] = previousPaths;
+  else delete require.cache[pathsPath];
+  if (previousProbe) require.cache[probePath] = previousProbe;
+  else delete require.cache[probePath];
   fs.rmSync(folder,{recursive:true,force:true});
 }
