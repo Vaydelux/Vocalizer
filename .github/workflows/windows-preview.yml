@@ -11,8 +11,10 @@ on:
         description: "Create/update a GitHub DRAFT prerelease (never auto-publish)"
         type: boolean
         default: false
+  pull_request:
+    branches: [main]
   push:
-    branches: [main, phase4/stability-recovery]
+    branches: [main]
 
 permissions:
   contents: read
