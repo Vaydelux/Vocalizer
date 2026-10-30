@@ -48,7 +48,7 @@ function createWindow(): void {
     show: false,
     autoHideMenuBar: true,
     backgroundColor: "#0a0a0b",
-    title: "Local Audio Studio",
+    title: "Vocalizer",
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
@@ -61,7 +61,16 @@ function createWindow(): void {
 
   // Block all new-window creation and force external links to the OS browser.
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    void shell.openExternal(url);
+    // Never forward file:, javascript:, custom-protocol, or malformed URLs
+    // to the operating system. Only user-clicked web links may leave the app.
+    try {
+      const target = new URL(url);
+      if (target.protocol === "https:" || target.protocol === "http:") {
+        void shell.openExternal(target.href);
+      }
+    } catch {
+      // Invalid URLs are denied.
+    }
     return { action: "deny" };
   });
 
@@ -94,11 +103,27 @@ if (!app.requestSingleInstanceLock()) {
     // resolve to the filesystem root and 404. The las:// scheme maps every
     // request to a real file in the renderer directory, with traversal rejected.
     protocol.handle("las", (request) => {
-      const u = new URL(request.url);
-      const rel = decodeURIComponent(u.pathname).replace(/^\//, "");
-      const base = rendererDir();
-      const resolved = path.normalize(path.join(base, rel));
-      if (!resolved.startsWith(base)) {
+      let relativePath: string;
+      try {
+        const url = new URL(request.url);
+        if (url.hostname !== "renderer" || url.username || url.password || url.port) {
+          return new Response("Forbidden", { status: 403 });
+        }
+        relativePath = decodeURIComponent(url.pathname).replace(/^\/+/, "");
+      } catch {
+        return new Response("Bad request", { status: 400 });
+      }
+      // Check path components rather than a raw startsWith(base) prefix:
+      // C:\\app\\out-evil is NOT inside C:\\app\\out.
+      const segments = relativePath.split("/");
+      if (!relativePath || relativePath.includes("\\") || relativePath.includes("\0") ||
+          segments.some((part) => part === "." || part === "..")) {
+        return new Response("Forbidden", { status: 403 });
+      }
+      const base = path.resolve(rendererDir());
+      const resolved = path.resolve(base, relativePath);
+      const rel = path.relative(base, resolved);
+      if (rel === ".." || rel.startsWith(".." + path.sep) || path.isAbsolute(rel)) {
         return new Response("Forbidden", { status: 403 });
       }
       return net.fetch(pathToFileURL(resolved).href);
@@ -116,7 +141,7 @@ if (!app.requestSingleInstanceLock()) {
         { role: "editMenu" },
         {
           label: "View",
-          submenu: [{ role: "reload" }, { role: "toggleDevTools" }],
+          submenu: isPackaged ? [{ role: "reload" }] : [{ role: "reload" }, { role: "toggleDevTools" }],
         },
       ])
     );
@@ -137,7 +162,15 @@ app.on("window-all-closed", () => {
 // Harden navigation: only allow loads to the app's own origin (las://) or localhost dev.
 app.on("web-contents-created", (_event, contents) => {
   contents.on("will-navigate", (event, url) => {
-    const allowed = url.startsWith("las://") || url.startsWith("http://localhost:3000") || url.startsWith("file://");
+    let allowed = false;
+    try {
+      const target = new URL(url);
+      allowed = isPackaged
+        ? target.protocol === "las:" && target.hostname === "renderer"
+        : target.origin === "http://localhost:3000";
+    } catch {
+      // A malformed navigation destination is never allowed.
+    }
     if (!allowed) event.preventDefault();
   });
 });

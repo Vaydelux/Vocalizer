@@ -175,8 +175,16 @@ class JobRunner:
         self.job_start = time.time()
 
         python = sys.executable or sysconfig.get_executable() or "python3"
+        # A PyInstaller executable is itself the interpreter/entrypoint.
+        # Passing __file__ as an argv entry would cause the frozen worker to
+        # enter parent mode again instead of the --job child mode.
+        command = (
+            [python, "--job", job_file]
+            if getattr(sys, "frozen", False)
+            else [python, os.path.abspath(__file__), "--job", job_file]
+        )
         self.proc = subprocess.Popen(
-            [python, os.path.abspath(__file__), "--job", job_file],
+            command,
             stdout=subprocess.PIPE,
             # Inherit stderr: the child's diagnostics go straight to the app's
             # stderr. (A PIPE that is never drained would deadlock the child.)
@@ -328,6 +336,11 @@ def handle_separate(req: dict[str, Any]) -> None:
 
 
 def handle_cancel(req: dict[str, Any]) -> None:
+    # Only the owner of the active request may cancel it. A stale job ID must
+    # never interrupt a later, unrelated separation job.
+    if not runner.active or runner.request_id != req.get("requestId"):
+        emit(ERROR_MSG(req.get("requestId", "?"), "unknown", "No matching active separation job to cancel."))
+        return
     if runner.cancel():
         with runner.write_lock:
             emit(ERROR_MSG(runner.request_id or req.get("requestId", "?"), "cancelled", "Separation cancelled."))

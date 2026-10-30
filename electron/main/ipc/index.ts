@@ -146,6 +146,7 @@ export function registerIpcHandlers(_getMainWindow: () => BrowserWindow | null):
     const req = inferenceSeparateRequestSchema.parse(raw);
     try {
       const result = await runSeparation({
+        jobId: req.jobId,
         modelId: req.modelId,
         modelPath: req.modelPath,
         architecture: req.architecture,
@@ -182,8 +183,7 @@ export function registerIpcHandlers(_getMainWindow: () => BrowserWindow | null):
   ipcMain.handle(IPC.INFERENCE_CANCEL, async (event, raw) => {
     assertSender(event);
     const req = cancelRequestSchema.parse(raw ?? {});
-    cancelSeparation(req.jobId);
-    return { cancelled: true };
+    return { cancelled: cancelSeparation(req.jobId) };
   });
 
   /* --------------------------------- system --------------------------------- */

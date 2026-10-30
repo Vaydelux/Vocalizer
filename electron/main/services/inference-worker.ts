@@ -118,13 +118,23 @@ interface PendingRequest {
 
 let workerProc: ChildProcess | null = null;
 let ready = false;
-let seq = 0;
+let startingWorker: Promise<void> | null = null;
 const pending = new Map<string, PendingRequest>();
 let stdoutBuffer = "";
 
-/** Spawn the worker (once) and wait for its `ready` message. */
-async function ensureWorker(): Promise<void> {
-  if (workerProc && ready) return;
+/** Serialize worker startup so simultaneous jobs never spawn duplicate parents. */
+function ensureWorker(): Promise<void> {
+  if (workerProc && ready) return Promise.resolve();
+  if (!startingWorker) {
+    startingWorker = startWorker().finally(() => {
+      startingWorker = null;
+    });
+  }
+  return startingWorker;
+}
+
+/** Spawn the worker and await the real protocol v1 ready handshake. */
+async function startWorker(): Promise<void> {
   const worker = resolveWorker();
   if (!worker) {
     throw studioError(
@@ -156,25 +166,33 @@ async function ensureWorker(): Promise<void> {
   workerProc.on("close", (code) => {
     ready = false;
     workerProc = null;
-    if (code !== 0 && code !== null) {
-      failAll(studioError("INFERENCE_FAILED", `Worker exited with code ${code}.`));
-    }
+    stdoutBuffer = "";
+    // A clean shutdown during a pending job is still a failed job.
+    failAll(studioError("INFERENCE_FAILED", `Worker exited before all requests completed (code ${code}).`));
   });
-  // Send init and wait for ready.
+  // Wait for a ready handshake with a bounded, cleaned-up poll.
+  // Previously the 100 ms timer loop continued indefinitely after timeout.
+  const startingProcess = workerProc;
   send({ type: "init", protocolVersion: 1 });
   await new Promise<void>((resolve, reject) => {
     const timeout = setTimeout(() => {
+      clearInterval(poll);
+      if (workerProc === startingProcess) {
+        startingProcess?.kill();
+      }
       reject(studioError("RUNTIME_UNAVAILABLE", "Worker did not become ready in time."));
     }, 30000);
-    const check = () => {
-      if (ready) {
+    const poll = setInterval(() => {
+      if (workerProc !== startingProcess) {
         clearTimeout(timeout);
+        clearInterval(poll);
+        reject(studioError("RUNTIME_UNAVAILABLE", "Inference worker exited before initialization."));
+      } else if (ready) {
+        clearTimeout(timeout);
+        clearInterval(poll);
         resolve();
-      } else {
-        setTimeout(check, 100);
       }
-    };
-    check();
+    }, 100);
   });
 }
 
@@ -211,6 +229,7 @@ function failAll(err: unknown): void {
 }
 
 export interface SeparateParams {
+  jobId: string;
   modelId: string;
   modelPath: string;
   architecture: "mdx-net" | "demucs" | "bs-roformer" | "melband-roformer" | "vr-arch" | "mdxc";
@@ -226,32 +245,41 @@ export interface SeparateParams {
 /** Run a separation. Throws a typed error if no worker is bundled. */
 export async function runSeparation(params: SeparateParams): Promise<WorkerResponse> {
   await ensureWorker();
-  const requestId = `req-${++seq}-${Date.now().toString(36)}`;
+  const requestId = params.jobId;
+  if (pending.has(requestId)) {
+    throw studioError("INFERENCE_FAILED", "An inference job with this ID is already running.");
+  }
   return new Promise<WorkerResponse>((resolve, reject) => {
     pending.set(requestId, { resolve, reject, onProgress: params.onProgress });
-    send({
-      type: "separate",
-      requestId,
-      modelId: params.modelId,
-      modelPath: params.modelPath,
-      architecture: params.architecture,
-      configPath: params.configPath,
-      inputPath: params.inputPath,
-      outputDir: params.outputDir,
-      requestedStems: params.requestedStems as ("Vocals" | "Instrumental" | "Drums" | "Bass" | "Guitar" | "Piano" | "Other")[],
-      outputFormat: params.outputFormat,
-      device: params.device,
-    });
+    try {
+      send({
+        type: "separate",
+        requestId,
+        modelId: params.modelId,
+        modelPath: params.modelPath,
+        architecture: params.architecture,
+        configPath: params.configPath,
+        inputPath: params.inputPath,
+        outputDir: params.outputDir,
+        requestedStems: params.requestedStems as ("Vocals" | "Instrumental" | "Drums" | "Bass" | "Guitar" | "Piano" | "Other")[],
+        outputFormat: params.outputFormat,
+        device: params.device,
+      });
+    } catch (err) {
+      pending.delete(requestId);
+      reject(err);
+    }
   });
 }
 
 /** Cancel a pending separation request. */
-export function cancelSeparation(requestId: string): void {
-  if (!workerProc) return;
+export function cancelSeparation(requestId: string): boolean {
+  if (!workerProc || !pending.has(requestId)) return false;
   try {
     send({ type: "cancel", requestId });
+    return true;
   } catch {
-    /* worker already gone */
+    return false; // The worker has already exited; no cancellation confirmed.
   }
 }
 

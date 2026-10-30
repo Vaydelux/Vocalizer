@@ -1,0 +1,39 @@
+name: Validate source
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.4"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install JavaScript dependencies
+        run: bun install --frozen-lockfile
+      - name: Lint
+        run: bun run lint
+      - name: Check renderer TypeScript
+        run: bun run typecheck
+      - name: Check Electron TypeScript
+        run: bun run typecheck:electron
+      - name: Verify Python syntax
+        run: python -m compileall -q inference/worker scripts/verify-separation.py
+      - name: Worker protocol and cancellation tests
+        run: python -m unittest discover -s tests -p "test_*.py" -v
+      - name: Build Electron static renderer
+        run: bun run electron:build-renderer
+      - name: Compile Electron
+        run: bun run electron:compile

@@ -47,8 +47,8 @@ hiddenimports = [
 ]
 
 a = Analysis(
-    ["main.py"],
-    pathex=["."],
+    [os.path.join(SPECPATH, "main.py")],
+    pathex=[SPECPATH],
     binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
@@ -83,16 +83,6 @@ coll = COLLECT(
     name="inference-worker",
 )
 
-# Emit a runtime manifest describing the packaged worker (consumed by Electron).
-manifest = {
-    "worker": "inference-worker.exe",
-    "protocolVersion": 1,
-    "platform": "windows-x64",
-    "builtWithPyInstaller": True,
-}
-out_dir = os.path.join(os.path.dirname(SPECPATH), "..", "dist", "inference-worker")
-try:
-    with open(os.path.join(SPECPATH, "runtime-manifest.json"), "w", encoding="utf-8") as fh:
-        json.dump(manifest, fh, indent=2)
-except OSError:
-    pass
+# The build workflow moves the onedir directory to
+# inference-dist/windows-x64 and writes runtime-manifest.json there.
+# This spec intentionally does not write artifacts back into source control.
