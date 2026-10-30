@@ -160,7 +160,7 @@ jobs:
 
   draft_release:
     # A draft release is a private staging artifact, NOT a public release.
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.create_draft_release }}
+    if: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/phase2/windows-inference-integration') || (github.event_name == 'workflow_dispatch' && inputs.create_draft_release) }}
     needs: preview
     runs-on: ubuntu-latest
     permissions:
