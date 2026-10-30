@@ -10,14 +10,13 @@
 # asar) and resolved at runtime from process.resourcesPath/binaries. No global
 # Node/Python/FFmpeg is required on the user's machine.
 
-appId: io.localaudioaudio.studio
+appId: io.vaydelux.vocalizer
 productName: Local Audio Studio
 copyright: Copyright (c) Local Audio Studio
 directories:
   output: release
   buildResources: electron/build
-# Production entry — the compiled main process.
-main: electron/dist/main/index.js
+# Electron entrypoint is declared in package.json ("main").
 files:
   - out/**
   - electron/dist/**
@@ -31,11 +30,10 @@ extraResources:
   - from: inference-dist/windows-x64/
     to: inference/
     filter: ["**/*"]
-  # Protected bundled default model (ONLY after the licensing gate in
-  # inference/models/PROVENANCE.md is cleared — see that file).
-  - from: resources/models/default/
-    to: models/default/
-    filter: ["**/*"]
+  # Deliberately no default model in this preview build. The model's
+  # redistribution rights are unverified; see inference/models/PROVENANCE.md.
+  # A separate release configuration must add approved weights only after
+  # licensing, checksum and offline inference acceptance gates pass.
 # Preload scripts must be unpacked from asar (sandboxed preloads cannot load from asar).
 asarUnpack:
   - electron/dist/preload/**

@@ -11,8 +11,9 @@ const nextConfig: NextConfig = {
   output: isElectronBuild ? "export" : "standalone",
   // Static export requires unoptimized images (no server image optimizer).
   images: isElectronBuild ? { unoptimized: true } : undefined,
+  // A release build must fail on TypeScript errors; do not mask failures.
   typescript: {
-    ignoreBuildErrors: true,
+    ignoreBuildErrors: false,
   },
   reactStrictMode: false,
 };

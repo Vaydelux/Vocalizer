@@ -175,8 +175,16 @@ class JobRunner:
         self.job_start = time.time()
 
         python = sys.executable or sysconfig.get_executable() or "python3"
+        # A PyInstaller executable is itself the interpreter/entrypoint.
+        # Passing __file__ as an argv entry would cause the frozen worker to
+        # enter parent mode again instead of the --job child mode.
+        command = (
+            [python, "--job", job_file]
+            if getattr(sys, "frozen", False)
+            else [python, os.path.abspath(__file__), "--job", job_file]
+        )
         self.proc = subprocess.Popen(
-            [python, os.path.abspath(__file__), "--job", job_file],
+            command,
             stdout=subprocess.PIPE,
             # Inherit stderr: the child's diagnostics go straight to the app's
             # stderr. (A PIPE that is never drained would deadlock the child.)
