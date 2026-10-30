@@ -129,6 +129,14 @@ const WavePlayerImpl: ForwardRefRenderFunction<WavePlayerHandle, Props> = (
     audioRef.current = audio;
     audio.volume = muted ? 0 : volume;
 
+    const onLoadStart = () => {
+      if (cancelled) return;
+      setError(null);
+      setReady(false);
+      setPlaying(false);
+      setCurrentTime(0);
+      setDuration(0);
+    };
     const onLoaded = () => {
       if (cancelled) return;
       if (Number.isFinite(audio.duration) && audio.duration > 0) {
@@ -153,6 +161,7 @@ const WavePlayerImpl: ForwardRefRenderFunction<WavePlayerHandle, Props> = (
       setReady(false);
       setError("This file could not be played. Try re-importing it, or convert it to WAV.");
     };
+    audio.addEventListener("loadstart", onLoadStart);
     audio.addEventListener("loadedmetadata", onLoaded);
     audio.addEventListener("durationchange", onLoaded);
     audio.addEventListener("timeupdate", onTime);
@@ -160,11 +169,6 @@ const WavePlayerImpl: ForwardRefRenderFunction<WavePlayerHandle, Props> = (
     audio.addEventListener("pause", onPause);
     audio.addEventListener("ended", onEnded);
     audio.addEventListener("error", onError);
-    setError(null);
-    setReady(false);
-    setPlaying(false);
-    setCurrentTime(0);
-    setDuration(0);
     peaksRef.current = null;
     audio.src = track.url;
     audio.load();
@@ -200,6 +204,7 @@ const WavePlayerImpl: ForwardRefRenderFunction<WavePlayerHandle, Props> = (
     return () => {
       cancelled = true;
       cancelAnimationFrame(rafRef.current);
+      audio.removeEventListener("loadstart", onLoadStart);
       audio.removeEventListener("loadedmetadata", onLoaded);
       audio.removeEventListener("durationchange", onLoaded);
       audio.removeEventListener("timeupdate", onTime);
