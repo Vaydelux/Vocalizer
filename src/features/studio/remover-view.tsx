@@ -22,6 +22,7 @@ import { useSettings } from "@/lib/studio/store-settings";
 import { makeInferenceTask } from "@/lib/studio/inference-task";
 import { useJobs } from "@/lib/studio/store-jobs";
 import { formatTime } from "@/lib/studio/format";
+import { native, isNative } from "@/lib/studio/native";
 
 export function RemoverView() {
   const preselected = useUi((s) => s.preselectedTrackId);
@@ -36,6 +37,18 @@ export function RemoverView() {
   const exportFormat = useSettings((s) => s.exportFormat);
   const mp3Bitrate = useSettings((s) => s.mp3Bitrate);
   const enqueue = useJobs((s) => s.enqueue);
+  const [localModelPath, setLocalModelPath] = useState<string | null>(null);
+  const [workerAvailable, setWorkerAvailable] = useState(false);
+  const [localModelError, setLocalModelError] = useState<string | null>(null);
+  useEffect(() => {
+    const api = native();
+    if (!api) return;
+    let active = true;
+    void api.inferenceStatus().then((s) => {
+      if (active) setWorkerAvailable(s.workerAvailable);
+    }).catch(() => { if (active) setWorkerAvailable(false); });
+    return () => { active = false; };
+  }, []);
 
   // Resolve the real availability of the selected model for vocal removal.
   // Always unavailable in this build — but the reason is derived from the
@@ -81,10 +94,10 @@ export function RemoverView() {
             )}
           </div>
 
-          <CapabilityBanner tone="unavailable" title="Audio separation is not available yet. Install a compatible model when AI processing support is enabled.">
-            The reserved built-in model slot (“{builtin.name}”) is not installed in this phase, and no
-            bundled inference runtime exists in the current build. These controls stay inactive rather
-            than simulate output.
+          <CapabilityBanner tone={localModelPath && workerAvailable ? "info" : "unavailable"} title={workerAvailable ? "Local MDX-Net preview — provide a verified ONNX checkpoint" : "AI separation requires the packaged Windows inference worker"}>
+            No model weights are bundled until redistribution rights are confirmed. A user-supplied
+            checkpoint can run locally when the Windows worker is installed. Only the exact
+            UVR-MDX-NET-Inst_HQ_5.onnx checksum is accepted; other models remain unavailable.
           </CapabilityBanner>
 
           <div className="grid gap-4 lg:grid-cols-2">
@@ -111,8 +124,41 @@ export function RemoverView() {
                 </Select>
                 <p className="flex items-start gap-2 text-xs text-muted-foreground">
                   <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
-                  {selectedModel ? resolutionReason : "Select a model when one becomes available in the Model Manager."}
+                  {selectedModel ? resolutionReason : "The registry does not yet contain a bundled default model."}
                 </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full"
+                  disabled={!isNative()}
+                  onClick={async () => {
+                    setLocalModelError(null);
+                    try {
+                      const paths = await native()?.openFiles({
+                        multiple: false,
+                        filters: [{ name: "MDX-Net ONNX checkpoint", extensions: ["onnx"] }],
+                      });
+                      if (paths?.length) {
+                        const selected = paths[0];
+                        if (selected.split(/[\\/]/).pop() !== "UVR-MDX-NET-Inst_HQ_5.onnx") {
+                          setLocalModelError("Select UVR-MDX-NET-Inst_HQ_5.onnx. Other models are not verified.");
+                        } else {
+                          setLocalModelPath(selected);
+                        }
+                      }
+                    } catch (err) {
+                      setLocalModelError(err instanceof Error ? err.message : "Cannot open the model file.");
+                    }
+                  }}
+                >
+                  Choose local MDX-Net model
+                </Button>
+                {localModelPath ? (
+                  <p className="break-all text-xs text-muted-foreground">
+                    Selected: {localModelPath.split(/[\\/]/).pop()} (integrity checked on processing)
+                  </p>
+                ) : null}
+                {localModelError ? <p role="alert" className="text-xs text-destructive">{localModelError}</p> : null}
               </CardContent>
             </Card>
 
@@ -135,7 +181,7 @@ export function RemoverView() {
                 </div>
                 <Button
                   className="mt-3 w-full gap-1.5"
-                  disabled={!track}
+                  disabled={!track || !localModelPath || !workerAvailable}
                   onClick={() => {
                     if (!track) return;
                     enqueue(
@@ -148,6 +194,7 @@ export function RemoverView() {
                         device: "auto",
                         outputFormat: exportFormat,
                         mp3Bitrate,
+                        localModelPath: localModelPath ?? undefined,
                       })
                     );
                   }}
@@ -155,8 +202,8 @@ export function RemoverView() {
                   Start separation
                 </Button>
                 <p className="mt-2 text-center text-[11px] text-muted-foreground">
-                  Runs real AI inference when a model + runtime are installed. Without them, the job
-                  reports an honest “runtime unavailable” error — no stems are fabricated.
+                  Runs offline only with a compatible packaged worker and an existing local model.
+                  This is a two-stem CPU verification mode, not a bundled offline release.
                 </p>
               </CardContent>
             </Card>
