@@ -18,7 +18,6 @@
 
 import { spawn, type ChildProcess } from "node:child_process";
 import * as fs from "node:fs";
-import * as path from "node:path";
 import { buildFfmpegCommand } from "./ffmpeg-args";
 import { getFfmpegPath } from "./paths";
 import { createStagedOutput, publishStagedOutput, cleanupStagedOutput } from "./export-file";
