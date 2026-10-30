@@ -11,7 +11,6 @@ import { useEffect, useMemo, useState } from "react";
 import { Cpu, Copy, HardDrive, Mic, MonitorSpeaker, Puzzle, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/studio/page-header";
-import { isNative } from "@/lib/studio/native";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -158,8 +157,8 @@ export function SystemView() {
   const application: CapabilityItem[] = useMemo(
     () => [
       { label: "Application version", value: `v${APP_VERSION} — ${APP_MILESTONE}`, available: true },
-      { label: "UI runtime", value: `React 19 · Next.js 16 App Router (${isNative() ? "Electron desktop" : "web preview"})`, available: true },
-      { label: "Electron / Node / Chromium", value: isNative() ? "Electron host and secured preload detected" : "Not available in browser preview", available: isNative() },
+      { label: "UI runtime", value: "React 19 · Next.js 16 App Router", available: true },
+      { label: "Electron / Node / Chromium", value: "Electron availability is checked by the Remover and system IPC; this panel does not probe the native host.", available: null },
       { label: "Processing engine", value: "Web Audio API · WaveSurfer v8 · OfflineAudioContext", available: true },
     ],
     []

@@ -49,3 +49,5 @@ jobs:
         run: node scripts/test-inference-outputs.mjs
       - name: Test restart job receipt journal
         run: bun scripts/test-job-journal.ts
+      - name: Test complete Quick Help coverage
+        run: bun scripts/test-help-content.ts
