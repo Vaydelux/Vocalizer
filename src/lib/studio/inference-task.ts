@@ -126,6 +126,7 @@ export function makeInferenceTask(req: SeparationRequest): JobTask {
         stemFiles: result.stems,
         modelUsed: result.modelUsed,
         deviceUsed: result.deviceUsed,
+        sourceTrackId: req.track.id,
       };
     } catch (err) {
       if (ctx.signal.aborted) throw studioError("CANCELLED", "The inference job was cancelled.");

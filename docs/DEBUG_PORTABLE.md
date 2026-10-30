@@ -6,7 +6,7 @@ This build is a **portable-folder / unpacked Electron application**. It does not
 
 1. Open [Windows Debug EXE](https://github.com/Vaydelux/Vocalizer/actions/workflows/windows-preview.yml).
 2. Select a successful run on `phase2/windows-inference-integration`.
-3. Download the **Vocalizer-0.3.0-windows-x64-debug** artifact.
+3. Download the date-named **Vocalizer-YYYY-MM-DD-Windows-x64-Debug** artifact. The downloaded GitHub artifact contains **Vocalizer-YYYY-MM-DD-Windows-x64-Debug.zip**; extract that inner ZIP as well.
 4. Extract its entire ZIP to an ordinary writable folder on Windows x64.
 5. Double-click **Run-Vocalizer-Debug.cmd** to launch with DevTools and a diagnostic log, or **Vocalizer.exe** for ordinary operation.
 
@@ -36,3 +36,12 @@ The script uses `electron-builder --dir --publish never`: no NSIS installer, no 
 - No bundled default AI weights: the MDX-Net checkpoint redistribution rights are still unverified. The Remover can accept a compatible, locally supplied, SHA-256-verified checkpoint.
 - Builds and worker handshakes are **not the same as installed application / GUI / audio inference verification**. Test launch, file import, playback, non-AI tools, and CPU separation manually. Attach the log and relevant Actions run URL when reporting a failure.
 - GitHub Actions artifact retention is limited; this is not a public release.
+
+## Date-based release files
+
+Every successful Windows workflow prepares a file with a stable UTC date naming convention, **without random suffixes or run numbers**:
+
+- `Vocalizer-YYYY-MM-DD-Windows-x64-Debug.zip` — portable/unpacked debug app, no installation.
+- `Vocalizer-YYYY-MM-DD-Windows-x64-Setup.exe` — optional unsigned NSIS installer, created only when the workflow's **include_installer** input is enabled.
+
+From **Actions → Windows Debug EXE (no installer) → Run workflow**, choose **create_draft_release** only if you want GitHub to stage these files in a **draft pre-release**. A draft is intentionally not publicly released; verify binary provenance, model/FFmpeg licensing obligations, GUI operation and offline limitations before publishing it.
