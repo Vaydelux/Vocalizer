@@ -2,6 +2,8 @@ name: Windows Preview (unsigned, no model weights)
 
 on:
   workflow_dispatch:
+  push:
+    branches: [release/initial-windows-readiness]
 
 permissions:
   contents: read
