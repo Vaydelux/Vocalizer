@@ -60,6 +60,7 @@ export function useMicRecorder(): MicRecorder {
   const chunksRef = useRef<Blob[]>([]);
   const resultUrlRef = useRef<string | null>(null);
   const startingRef = useRef(false);
+  const mountedRef = useRef(true);
   const meterCtxRef = useRef<AudioContext | null>(null);
   const rafRef = useRef<number>(0);
   const timerRef = useRef<number>(0);
@@ -145,7 +146,7 @@ export function useMicRecorder(): MicRecorder {
 
   const start = useCallback(async () => {
     // A double-click during the permission prompt must not open two devices.
-    if (startingRef.current || recorderRef.current?.state === "recording" ||
+    if (!mountedRef.current || startingRef.current || recorderRef.current?.state === "recording" ||
         recorderRef.current?.state === "paused") return false;
     setError(null);
     if (!navigator.mediaDevices?.getUserMedia) {
@@ -165,6 +166,12 @@ export function useMicRecorder(): MicRecorder {
         ? { deviceId: { exact: selectedDeviceId }, echoCancellation: false, noiseSuppression: false }
         : { echoCancellation: false, noiseSuppression: false };
       const stream = await navigator.mediaDevices.getUserMedia({ audio });
+      // The user may navigate away while a permission prompt is open.
+      // Releasing a late stream prevents an invisible orphan microphone.
+      if (!mountedRef.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        return false;
+      }
       streamRef.current = stream;
       setPermission("granted");
       void refreshDevices();
@@ -285,6 +292,7 @@ export function useMicRecorder(): MicRecorder {
       streamRef.current?.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
       recorderRef.current = null;
+      if (!mountedRef.current) return;
       setState("stopped");
       setLevel(0);
       if (blob.size === 0) {
@@ -322,7 +330,9 @@ export function useMicRecorder(): MicRecorder {
   }, []);
 
   useEffect(() => {
+    mountedRef.current = true;
     return () => {
+      mountedRef.current = false;
       // Full teardown on unmount — no leaked capture devices or rAF loops.
       cancelAnimationFrame(rafRef.current);
       window.clearInterval(timerRef.current);
