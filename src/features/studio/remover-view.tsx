@@ -15,6 +15,8 @@ import { TrackSelect } from "@/components/studio/track-select";
 import { CapabilityBanner } from "@/components/studio/capability-banner";
 import { InlineJob } from "@/components/studio/inline-job";
 import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useTracks } from "@/lib/studio/store-tracks";
 import { useUi } from "@/lib/studio/store-ui";
@@ -49,6 +51,7 @@ export function RemoverView() {
   const currentJob = lastJobId ? jobs.find((j) => j.id === lastJobId) : undefined;
 
   const [localModelPath, setLocalModelPath] = useState<string | null>(null);
+  const [inferenceProfile, setInferenceProfile] = useState<"low-memory" | "balanced" | "thorough">("balanced");
   const [localModelError, setLocalModelError] = useState<string | null>(null);
   const [workerDetected, setWorkerDetected] = useState(false);
   const [checkingRuntime, setCheckingRuntime] = useState(true);
@@ -122,6 +125,7 @@ export function RemoverView() {
         outputFormat: exportFormat,
         mp3Bitrate,
         localModelPath,
+        profile: inferenceProfile,
       })
     );
     setLastJobId(id);
@@ -212,6 +216,18 @@ export function RemoverView() {
                   </div>
                 ) : <p className="text-xs text-muted-foreground">No checkpoint selected.</p>}
                 {localModelError ? <p role="alert" className="text-xs text-destructive">{localModelError}</p> : null}
+                <div className="space-y-2">
+                  <Label htmlFor="ai-processing-profile">Processing profile</Label>
+                  <Select value={inferenceProfile} onValueChange={(v) => setInferenceProfile(v as typeof inferenceProfile)} disabled={Boolean(activeInference)}>
+                    <SelectTrigger id="ai-processing-profile"><SelectValue placeholder="Select a profile" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="low-memory">Lower memory · 128 segments</SelectItem>
+                      <SelectItem value="balanced">Balanced · 256 segments</SelectItem>
+                      <SelectItem value="thorough">Thorough · increased overlap</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">Thorough may take longer and use more resources. It is not guaranteed to sound better; compare results with the same source audio.</p>
+                </div>
               </CardContent>
             </Card>
 

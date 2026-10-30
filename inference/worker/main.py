@@ -82,7 +82,8 @@ def run_job_child(job_file: str) -> int:
             output_format=req.get("outputFormat", "wav"),
             device=req.get("device", "cpu"),
             on_progress=lambda p, s: emit({"type": "progress", "requestId": request_id, "progress": p, "stage": s}),
-            segment_size=int(req.get("segmentSize", 256)),
+            profile=req.get("profile", "balanced"),
+            segment_size=req.get("segmentSize"),
         )
         emit({
             "type": "result",
@@ -155,7 +156,8 @@ class JobRunner:
             # silently pin the child to the 256 default (found by live testing:
             # a 128 request kept running at 256 and OOM-killed in the 4GB
             # sandbox cgroup).
-            "segmentSize": int(req.get("segmentSize", 256)),
+            "segmentSize": req.get("segmentSize"),
+            "profile": req.get("profile", "balanced"),
         }
         fd, job_file = tempfile.mkstemp(prefix="las-job-", suffix=".json")
         with os.fdopen(fd, "w", encoding="utf-8") as fh:

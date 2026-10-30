@@ -157,8 +157,8 @@ export function SystemView() {
   const application: CapabilityItem[] = useMemo(
     () => [
       { label: "Application version", value: `v${APP_VERSION} — ${APP_MILESTONE}`, available: true },
-      { label: "UI runtime", value: "React 19 · Next.js 16 App Router (web preview)", available: true },
-      { label: "Electron / Node / Chromium", value: "N/A in web preview — populated by the desktop build", available: null },
+      { label: "UI runtime", value: "React 19 · Next.js 16 App Router", available: true },
+      { label: "Electron / Node / Chromium", value: "Electron availability is checked by the Remover and system IPC; this panel does not probe the native host.", available: null },
       { label: "Processing engine", value: "Web Audio API · WaveSurfer v8 · OfflineAudioContext", available: true },
     ],
     []
@@ -195,12 +195,12 @@ export function SystemView() {
       { label: "Python runtime", value: "Not probed — desktop-build capability", available: null },
       {
         label: "ONNX Runtime",
-        value: `Not bundled — ${INFERENCE_ADAPTERS.filter((a) => a.runtimes.some((r) => r.startsWith("onnxruntime"))).length} ONNX adapter(s) registered, all unavailable`,
+        value: `Not directly probed here — ${INFERENCE_ADAPTERS.filter((a) => a.runtimes.some((r) => r.startsWith("onnxruntime"))).length} ONNX adapter(s) in metadata registry. Check Remover for worker status.`,
         available: false,
       },
       {
         label: "PyTorch runtime",
-        value: `Not bundled — ${INFERENCE_ADAPTERS.filter((a) => a.runtimes.some((r) => r.startsWith("pytorch"))).length} PyTorch adapter(s) registered, all unavailable`,
+        value: `Not directly probed here — ${INFERENCE_ADAPTERS.filter((a) => a.runtimes.some((r) => r.startsWith("pytorch"))).length} PyTorch adapter(s) in metadata registry.`,
         available: false,
       },
       { label: "CUDA / DirectML / MPS", value: "Not applicable in web preview; GPU presence ≠ AI backend support", available: false },
@@ -214,7 +214,7 @@ export function SystemView() {
         value: `${userModels.length} user-registered · built-in slot: ${builtin.status}`,
         available: false,
       },
-      { label: "Fallback readiness", value: "Not ready — no installed model / no runtime", available: false },
+      { label: "Fallback readiness", value: "No bundled default model. Use Remover to select the separately verified ONNX checkpoint.", available: false },
     ],
     [userModels.length, builtin.status]
   );

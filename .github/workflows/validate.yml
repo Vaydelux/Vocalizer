@@ -9,6 +9,11 @@ on:
 permissions:
   contents: read
 
+# Cancel superseded source builds when a PR receives a newer commit.
+concurrency:
+  group: validate-source-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   checks:
     runs-on: ubuntu-latest
@@ -49,3 +54,5 @@ jobs:
         run: node scripts/test-inference-outputs.mjs
       - name: Test restart job receipt journal
         run: bun scripts/test-job-journal.ts
+      - name: Test complete Quick Help coverage
+        run: bun scripts/test-help-content.ts

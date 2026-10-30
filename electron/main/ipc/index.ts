@@ -306,6 +306,7 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
         requestedStems: req.requestedStems as string[],
         outputFormat: req.outputFormat,
         device: req.device,
+        profile: req.profile,
         onProgress: (p) => {
           if (!sender.isDestroyed()) {
             const prog: InferenceProgress = { jobId: req.jobId, progress: p.progress, stage: p.stage };

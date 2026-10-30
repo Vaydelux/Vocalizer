@@ -190,6 +190,7 @@ export const inferenceSeparateRequestSchema = z.object({
   requestedStems: z.array(z.enum(["Vocals", "Instrumental", "Drums", "Bass", "Guitar", "Piano", "Other"])).min(1),
   outputFormat: z.enum(["wav", "wav24", "mp3", "flac"]),
   device: z.enum(["auto", "cpu", "cuda", "directml"]),
+  profile: z.enum(["low-memory", "balanced", "thorough"]).default("balanced"),
 });
 export type InferenceSeparateRequest = z.infer<typeof inferenceSeparateRequestSchema>;
 

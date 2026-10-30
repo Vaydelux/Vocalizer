@@ -103,7 +103,7 @@ inference/worker/
 inference/requirements/cpu.txt   # pinned CPU deps
 ```
 
-## Windows packaging (BLOCKED in this environment)
+## Windows packaging (GitHub Actions preview available)
 
 For the Windows installer, bundle a self-contained runtime via PyInstaller
 `--onedir` (directory-based for inspectability of large ML deps):
@@ -128,9 +128,7 @@ onedir executable (`<resourcesPath>/inference/inference-worker.exe`, or
 `isWorkerAvailable()` is true only when one of those layouts actually exists on
 disk.
 
-**This packaging was NOT produced or tested here** — no Windows toolchain,
-PyInstaller-on-Windows, or display to launch Electron exists in this Linux
-sandbox.
+**Windows GitHub Actions currently packages the frozen worker and an unpacked Electron app**, and exercises synthetic trim and microphone-mix smoke tests. This does **not** verify physical microphone quality, clean-machine support, or real-model Windows inference. Check the exact successful workflow run for verification.
 
 ## Licensing gate (BLOCKED)
 

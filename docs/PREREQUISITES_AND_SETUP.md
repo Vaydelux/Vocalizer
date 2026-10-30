@@ -8,8 +8,10 @@ This is the user-side setup and release-readiness guide for [Vocalizer](https://
 
 ## 1. You only want to run Vocalizer (no installation)
 
+Read [Quick Help](QUICK_HELP.md) for step-by-step control explanations in the new **Quick Help** sidebar workspace.
+
 - [ ] Use a **Windows x64** computer. Windows 10/11 is the practical testing target; a formal supported-OS minimum has not been certified. Leave several GB of free space for the archive, extracted application and output audio (10 GB+ is a **recommendation**, not a measured minimum).
-- [ ] Open the [successful Phase 3 Windows build](https://github.com/Vaydelux/Vocalizer/actions/runs/41054501996), sign in to GitHub and download its dated artifact from **Artifacts**.
+- [ ] Open the [Windows Debug workflow](https://github.com/Vaydelux/Vocalizer/actions/workflows/windows-preview.yml), choose the latest **successful main-branch run for the commit you want to test**, and download its dated artifact from **Artifacts**.
 - [ ] Extract the GitHub artifact ZIP. It may contain a second ZIP named `Vocalizer-YYYY-MM-DD-Windows-x64-Debug.zip`; extract that too.
 - [ ] Keep `Vocalizer.exe`, Electron DLLs and the **entire `resources/` folder together**. This is an unpacked application, **not** a standalone single-file EXE.
 - [ ] Double-click `Run-Vocalizer-Debug.cmd` for DevTools + logs, or double-click `Vocalizer.exe` for normal startup.
@@ -60,8 +62,8 @@ CUDA, NVIDIA toolkit, developer API keys and cloud AI accounts are **not require
 ```powershell
 git clone https://github.com/Vaydelux/Vocalizer.git
 cd Vocalizer
-# Phase 3 is still a draft PR at the time of writing:
-git checkout phase3/windows-acceptance-and-stem-playback
+# Clone current merged development branch:
+git checkout main
 
 bun install --frozen-lockfile
 bun run lint
@@ -156,6 +158,6 @@ GitHub draft tag: debug-YYYY-MM-DD
 
 ## 8. Status and next steps
 
-As of **2026-10-30**, source validation and [Phase 3 Windows debug build](https://github.com/Vaydelux/Vocalizer/actions/runs/41054501996) passed on commit `c57a8f1`. This includes a packaged startup test and original synthetic audio processing. **PR #3 remains draft**, real-model clean-Windows acceptance has not been completed, and the model-license gate remains open. Do not call this a fully bundled offline AI product or a production-approved public release.
+As of **2026-10-30**, source validation and the latest successfully validated commit can be checked in [GitHub Actions](https://github.com/Vaydelux/Vocalizer/actions). CI includes synthetic native audio processing but not real microphone or full clean-Windows acceptance. The model license gate remains open. Do not call this a fully bundled offline AI product or a production-approved public release.
 
-**Next action for you:** Download the successful Windows debug ZIP, start `Run-Vocalizer-Debug.cmd`, complete Sections **1**, **2**, and **6**, and share any actual crash, UI or separation failures with sanitized logs. The development toolchain is optional.
+**Next action for you:** Read [Quick Help](QUICK_HELP.md), download the latest successful `main` debug ZIP, run `Run-Vocalizer-Debug.cmd`, and complete Sections **1**, **2**, and **6** with sanitized bug evidence. The development toolchain is optional.

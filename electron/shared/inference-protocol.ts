@@ -49,6 +49,7 @@ export const inferenceSeparateSchema = z.object({
   requestedStems: z.array(z.enum(["Vocals", "Instrumental", "Drums", "Bass", "Guitar", "Piano", "Other"])).min(1),
   outputFormat: z.enum(["wav", "wav24", "mp3", "flac"]),
   device: z.enum(["auto", "cpu", "cuda", "directml"]),
+  profile: z.enum(["low-memory", "balanced", "thorough"]).optional(),
 });
 
 /** Main → worker messages. */

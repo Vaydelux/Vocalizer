@@ -5,7 +5,8 @@
  * implemented view — there are no decorative placeholders.
  */
 
-import { AudioLines, Boxes, Combine, Cpu, House, KeySquare, ListChecks, Mic, MicOff, MicVocal, Music2, PanelLeftClose, PanelLeftOpen, Scissors, Settings, Split, ShieldCheck, type LucideIcon } from "lucide-react";
+import { AudioLines, BookOpen, Boxes, Combine, Cpu, House, KeySquare, ListChecks, Mic, MicOff, MicVocal, Music2, PanelLeftClose, PanelLeftOpen, Scissors, Settings, Split, ShieldCheck, type LucideIcon } from "lucide-react";
+import { HELP_BY_ID } from "@/lib/studio/help-content";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Badge } from "@/components/ui/badge";
 import { useUi, type ViewId } from "@/lib/studio/store-ui";
@@ -45,6 +46,7 @@ const GROUPS: { title: string; items: NavItem[] }[] = [
       { id: "queue", label: "Processing Queue", icon: ListChecks },
       { id: "settings", label: "Settings", icon: Settings },
       { id: "system", label: "System Information", icon: Cpu },
+      { id: "help", label: "Quick Help", icon: BookOpen },
     ],
   },
 ];
@@ -118,13 +120,16 @@ export function SidebarNav({ mobile = false, onNavigate }: { mobile?: boolean; o
                   );
                   return (
                     <li key={item.id}>
-                      {collapsed ? (
+                      {mobile ? button : (
                         <Tooltip>
                           <TooltipTrigger asChild>{button}</TooltipTrigger>
-                          <TooltipContent side="right">{item.label}</TooltipContent>
+                          <TooltipContent side="right" className="max-w-xs space-y-1">
+                            <p className="font-semibold">{item.label}</p>
+                            <p>{HELP_BY_ID[item.id].summary}</p>
+                            <p className="opacity-80">{HELP_BY_ID[item.id].availability}</p>
+                            <p className="opacity-80">Open the page and select Quick Help for every control.</p>
+                          </TooltipContent>
                         </Tooltip>
-                      ) : (
-                        button
                       )}
                     </li>
                   );

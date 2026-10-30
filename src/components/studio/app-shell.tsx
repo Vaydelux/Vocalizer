@@ -29,6 +29,7 @@ import { ModelsView } from "@/features/studio/models-view";
 import { QueueView } from "@/features/studio/queue-view";
 import { SettingsView } from "@/features/studio/settings-view";
 import { SystemView } from "@/features/studio/system-view";
+import { HelpView } from "@/features/studio/help-view";
 
 function ActiveView() {
   const view = useUi((s) => s.activeView);
@@ -59,6 +60,8 @@ function ActiveView() {
       return <SettingsView />;
     case "system":
       return <SystemView />;
+    case "help":
+      return <HelpView />;
     default:
       return <HomeView />;
   }

@@ -8,9 +8,9 @@
  * - Local file inspection results (SHA-256, format, adapter compatibility).
  * - Fallback resolution via the pure `resolveModelForOperation` resolver.
  *
- * Inference is NEVER enabled in this build. A valid manifest + recognized
- * adapter only registers metadata; the resolver always reports runtime-
- * unavailable because no adapter reports a bundled runtime.
+ * Models registered through this registry are metadata-only and never execute.
+ * The separate Remover workspace uses one explicitly verified local MDX-Net
+ * model and the bundled CPU worker; registry readiness does not authorize it.
  */
 
 import { create } from "zustand";

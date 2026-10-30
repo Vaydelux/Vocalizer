@@ -155,6 +155,7 @@ export interface StudioNativeApi {
     requestedStems: string[];
     outputFormat: FfmpegFormat;
     device: "auto" | "cpu" | "cuda" | "directml";
+    profile?: "low-memory" | "balanced" | "thorough";
   }): Promise<InferenceSeparateResult>;
   cancelInference(req: { jobId: string }): Promise<{ cancelled: boolean }>;
   revealInferenceStem(req: { jobId: string; stem: InferenceStemResult["stem"] }): Promise<{ revealed: boolean }>;

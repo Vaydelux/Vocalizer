@@ -29,6 +29,7 @@ export interface SeparationRequest {
   mp3Bitrate?: Mp3Bitrate;
   /** Explicit local MDX checkpoint selected by the user. Never fetched automatically. */
   localModelPath?: string;
+  profile?: "low-memory" | "balanced" | "thorough";
 }
 
 export function makeInferenceTask(req: SeparationRequest): JobTask {
@@ -78,7 +79,7 @@ export function makeInferenceTask(req: SeparationRequest): JobTask {
     if (!outputDir) throw studioError("CANCELLED", "No output directory selected.");
 
     const fmt = req.outputFormat === "wav16" ? "wav" : req.outputFormat === "wav24" ? "wav24" : req.outputFormat;
-    ctx.log(`Inference: ${modelId} on CPU → ${outputDir}`);
+    ctx.log(`Inference: ${modelId} on CPU, profile=${req.profile ?? "balanced"} → ${outputDir}`);
 
     // 4. Subscribe to progress, then run.
     const unsub = api.onInferenceProgress((p) => {
@@ -102,6 +103,7 @@ export function makeInferenceTask(req: SeparationRequest): JobTask {
         requestedStems: req.requestedStems,
         outputFormat: fmt,
         device: "cpu",
+        profile: req.profile ?? "balanced",
       });
       ctx.log(
         `Separation complete: ${result.stems.length} stem(s), model=${result.modelUsed}, device=${result.deviceUsed}, fallback=${result.fallbackUsed}.`
