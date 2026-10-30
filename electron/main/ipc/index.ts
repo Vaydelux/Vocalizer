@@ -6,6 +6,8 @@
 
 import { app, BrowserWindow, dialog, ipcMain, type IpcMainInvokeEvent, type WebContents } from "electron";
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
+import * as path from "node:path";
 import * as os from "node:os";
 import * as fs from "node:fs";
 import {
@@ -44,6 +46,40 @@ function assertSender(event: IpcMainInvokeEvent): WebContents {
   const win = BrowserWindow.fromWebContents(event.sender);
   if (!win) throw studioError("PERMISSION_DENIED", "IPC sender is not a recognized window.");
   return event.sender;
+}
+
+/** The only checkpoint allowed in the initial local-model preview. */
+const VERIFIED_MDX_NAME = "UVR-MDX-NET-Inst_HQ_5.onnx";
+const VERIFIED_MDX_SHA256 = "811cb24095d865763752310848b7ec86aeede0626cb05749ab35350e46897000";
+const VERIFIED_MDX_SIZE = 59074342;
+
+async function verifyLocalMdxModel(modelId: string, modelPath: string, architecture: string): Promise<void> {
+  if (architecture !== "mdx-net" || modelId !== VERIFIED_MDX_NAME) {
+    throw studioError("ARCHITECTURE_UNSUPPORTED", "Only the verified MDX-Net HQ 5 model is available for local testing.");
+  }
+  if (!path.isAbsolute(modelPath) || path.basename(modelPath) !== VERIFIED_MDX_NAME) {
+    throw studioError("MISSING_FILE", "Select the exact local ONNX checkpoint rather than a model identifier.");
+  }
+  let size: number;
+  try {
+    const stat = await fs.promises.stat(modelPath);
+    if (!stat.isFile()) throw new Error("Not a regular file");
+    size = stat.size;
+  } catch {
+    throw studioError("MISSING_FILE", "The chosen model checkpoint is missing or unreadable.");
+  }
+  if (size !== VERIFIED_MDX_SIZE) {
+    throw studioError("MODEL_CORRUPTED", "The selected model does not match the approved checkpoint size.");
+  }
+  const hash = createHash("sha256");
+  try {
+    for await (const block of fs.createReadStream(modelPath)) hash.update(block);
+  } catch {
+    throw studioError("MISSING_FILE", "Cannot read the selected model file.");
+  }
+  if (hash.digest("hex") !== VERIFIED_MDX_SHA256) {
+    throw studioError("MODEL_CORRUPTED", "The selected checkpoint failed the SHA-256 integrity check.");
+  }
 }
 
 export function registerIpcHandlers(_getMainWindow: () => BrowserWindow | null): void {
@@ -145,6 +181,7 @@ export function registerIpcHandlers(_getMainWindow: () => BrowserWindow | null):
     const sender = assertSender(event);
     const req = inferenceSeparateRequestSchema.parse(raw);
     try {
+      await verifyLocalMdxModel(req.modelId, req.modelPath, req.architecture);
       const result = await runSeparation({
         jobId: req.jobId,
         modelId: req.modelId,
