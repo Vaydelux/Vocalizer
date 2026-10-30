@@ -1,23 +1,27 @@
 #!/usr/bin/env node
 /**
- * Cross-platform renderer build for the Electron desktop bundle.
+ * Cross-platform Next.js static export for the Electron renderer.
  *
- * `ELECTRON_BUILD=1 next build` is POSIX-only (it does not work in cmd.exe or
- * PowerShell without a Unix-style shell). This script sets the env var in a
- * portable way and runs `next build`, producing the static export in `out/`.
- *
- * Run it on the Windows build host before `electron-builder`.
+ * Calling "next.cmd" relies on the package manager creating a Windows shim
+ * and exporting it on PATH. Bun on Windows does not always do that. Launch the
+ * installed Next.js CLI through the current Node executable instead.
  */
 import { spawn } from "node:child_process";
+import path from "node:path";
 
-process.env.ELECTRON_BUILD = "1";
+const nextCli = path.resolve(process.cwd(), "node_modules", "next", "dist", "bin", "next");
+const child = spawn(process.execPath, [nextCli, "build"], {
+  stdio: "inherit",
+  shell: false,
+  env: { ...process.env, ELECTRON_BUILD: "1" },
+});
 
-const child = spawn(
-  process.platform === "win32" ? "next.cmd" : "next",
-  ["build"],
-  { stdio: "inherit", shell: process.platform === "win32" }
-);
+child.on("error", (error) => {
+  console.error("Cannot start Next.js static export:", error.message);
+  process.exitCode = 1;
+});
 
-child.on("exit", (code) => {
-  process.exit(code ?? 1);
+child.on("exit", (code, signal) => {
+  if (signal) console.error(`Next.js export terminated by signal ${signal}`);
+  process.exitCode = code ?? 1;
 });
