@@ -15,6 +15,7 @@ from audio_separator.separator import Separator as ASeparator
 from errors import WorkerError
 from audio_validation import verify_audio_file
 from local_model import require_local_mdx_model
+from inference_profiles import resolve_profile
 from stem_mapping import match_stems
 
 # Map a requested stem name to the audio-separator output-token convention.
@@ -47,7 +48,8 @@ class SeparatorService:
         output_format: str,
         device: str,
         on_progress,
-        segment_size: int = 256,
+        segment_size: int | None = None,
+        profile: str = "balanced",
     ) -> tuple[list[dict[str, Any]], str, str, bool]:
         if not os.path.isfile(input_path):
             raise WorkerError("inference-failed", f"Input file not found: {input_path}")
@@ -58,11 +60,12 @@ class SeparatorService:
         # The audio-separator library normally downloads missing checkpoints.
         # Never start the library until we verify an actual local checkpoint.
         verified_model = require_local_mdx_model(model_id, model_path)
+        preset = resolve_profile(profile, segment_size)
         os.makedirs(output_dir, exist_ok=True)
 
         on_progress(None, "Preparing")
         # Reuse a Separator per output format (the underlying model is cached).
-        cache_key = f"{architecture}:{verified_model}:{output_dir}:{output_format}:{segment_size}"
+        cache_key = f"{architecture}:{verified_model}:{output_dir}:{output_format}:{preset[\'segment_size\']}:{preset[\'overlap\']}"
         if cache_key not in self._separators:
             sep = ASeparator(
                 model_file_dir=str(verified_model.parent),
@@ -71,8 +74,8 @@ class SeparatorService:
                 log_level=40,  # WARNING — keep stdout clean
                 mdx_params={
                     "hop_length": 1024,
-                    "segment_size": segment_size,
-                    "overlap": 0.25,
+                    "segment_size": preset["segment_size"],
+                    "overlap": preset["overlap"],
                     "batch_size": 1,
                     "enable_denoise": False,
                 },

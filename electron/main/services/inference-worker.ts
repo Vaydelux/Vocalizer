@@ -114,6 +114,7 @@ export function isWorkerAvailable(): boolean {
 interface PendingRequest {
   resolve: (r: WorkerResponse) => void;
   reject: (err: unknown) => void;
+  profile?: "low-memory" | "balanced" | "thorough";
   onProgress?: (p: { progress: number | null; stage: string }) => void;
 }
 
@@ -316,6 +317,7 @@ export async function runSeparation(params: SeparateParams): Promise<WorkerRespo
         requestedStems: params.requestedStems as ("Vocals" | "Instrumental" | "Drums" | "Bass" | "Guitar" | "Piano" | "Other")[],
         outputFormat: params.outputFormat,
         device: params.device,
+        profile: params.profile ?? "balanced",
       });
     } catch (err) {
       pending.delete(requestId);
