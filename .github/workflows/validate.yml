@@ -39,3 +39,7 @@ jobs:
         run: bun run electron:compile
       - name: Test safe native export finalization
         run: node scripts/test-safe-export.mjs
+      - name: Test recording input staging
+        run: node scripts/test-recording-staging.mjs
+      - name: Test AI stem isolation and rollback
+        run: node scripts/test-inference-outputs.mjs

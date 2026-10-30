@@ -19,6 +19,7 @@ import * as fs from "node:fs";
 import { pathToFileURL } from "node:url";
 import { registerIpcHandlers, resolveCompletedStemForPlayback } from "./ipc";
 import { cleanupOrphanedRecordings } from "./services/recording-staging";
+import { cleanupInferenceScratch } from "./services/inference-outputs";
 
 export const isPackaged = app.isPackaged;
 const debugEnabled = process.argv.includes("--vocalizer-debug");
@@ -191,6 +192,8 @@ if (!app.requestSingleInstanceLock()) {
   app.whenReady().then(async () => {
     // Remove files from interrupted microphone recordings before accepting
     // any new IPC requests; never touch ordinary user audio.
+    try { cleanupInferenceScratch(app.getPath("userData")); }
+    catch (error) { console.error("Cannot clean up stale AI scratch:", error); }
     try { await cleanupOrphanedRecordings(app.getPath("userData")); }
     catch (error) { console.error("Cannot clean up stale recording data:", error); }
     debugLog(`Starting Vocalizer (packaged=${app.isPackaged}, resources=${process.resourcesPath})`);
