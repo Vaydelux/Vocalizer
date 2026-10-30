@@ -65,7 +65,7 @@ class SeparatorService:
 
         on_progress(None, "Preparing")
         # Reuse a Separator per output format (the underlying model is cached).
-        cache_key = f"{architecture}:{verified_model}:{output_dir}:{output_format}:{preset[\'segment_size\']}:{preset[\'overlap\']}"
+        cache_key = ":".join((architecture, str(verified_model), output_dir, output_format, str(preset["segment_size"]), str(preset["overlap"])))
         if cache_key not in self._separators:
             sep = ASeparator(
                 model_file_dir=str(verified_model.parent),
