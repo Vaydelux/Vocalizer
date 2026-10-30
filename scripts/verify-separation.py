@@ -30,6 +30,14 @@ import time
 WORKER_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "inference", "worker")
 
 
+def sha256_file(path: str) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
 def ffprobe(path: str) -> dict:
     argv = ["ffprobe", "-v", "error", "-show_format", "-show_streams", "-print_format", "json", path]
     proc = subprocess.run(argv, capture_output=True, text=True, timeout=60)
@@ -195,7 +203,7 @@ def main() -> int:
     distinct_files = len({os.path.realpath(item["path"]) for item in result["stems"]}) == len(stems)
     unique_labels = len(set(actual_stems)) == len(stems) and set(actual_stems) == set(stems)
     nonidentical_audio = len({
-        hashlib.sha256(open(item["path"], "rb").read()).hexdigest()
+        sha256_file(item["path"])
         for item in result["stems"] if os.path.isfile(item["path"])
     }) == len(stems) if ok else False
     passed = ok and unique_labels and distinct_files and nonidentical_audio
