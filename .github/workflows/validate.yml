@@ -39,6 +39,8 @@ jobs:
         run: bun run electron:compile
       - name: Test safe native export finalization
         run: node scripts/test-safe-export.mjs
+      - name: Test native FFmpeg cancellation during verification
+        run: node scripts/test-ffmpeg-cancel-verify.mjs
       - name: Test native Karaoke microphone alignment
         run: node scripts/test-mix-timing.mjs
       - name: Test microphone staging and container integrity
@@ -47,7 +49,3 @@ jobs:
         run: node scripts/test-inference-outputs.mjs
       - name: Test restart job receipt journal
         run: bun scripts/test-job-journal.ts
-      - name: Test recording input staging
-        run: node scripts/test-recording-staging.mjs
-      - name: Test AI stem isolation and rollback
-        run: node scripts/test-inference-outputs.mjs

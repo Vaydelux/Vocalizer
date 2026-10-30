@@ -38,7 +38,7 @@ export interface MicRecorder {
   mime: string | null;
   result: MicRecorderResult | null;
   selectDevice: (id: string) => void;
-  start: () => Promise<void>;
+  start: () => Promise<boolean>;
   pause: () => void;
   resume: () => void;
   stop: () => void;
@@ -58,6 +58,8 @@ export function useMicRecorder(): MicRecorder {
   const streamRef = useRef<MediaStream | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
+  const resultUrlRef = useRef<string | null>(null);
+  const startingRef = useRef(false);
   const meterCtxRef = useRef<AudioContext | null>(null);
   const rafRef = useRef<number>(0);
   const timerRef = useRef<number>(0);
@@ -142,17 +144,21 @@ export function useMicRecorder(): MicRecorder {
   }, [refreshDevices, hardStop]);
 
   const start = useCallback(async () => {
+    // A double-click during the permission prompt must not open two devices.
+    if (startingRef.current || recorderRef.current?.state === "recording" ||
+        recorderRef.current?.state === "paused") return false;
     setError(null);
     if (!navigator.mediaDevices?.getUserMedia) {
       setError({ code: "CAPABILITY_UNAVAILABLE", message: "Microphone capture is not supported by this environment." });
-      return;
+      return false;
     }
     const mime = pickRecorderMime();
     if (!mime) {
       setError({ code: "CAPABILITY_UNAVAILABLE", message: "MediaRecorder exposes no supported audio format in this browser." });
-      return;
+      return false;
     }
     setActiveMime(mime);
+    startingRef.current = true;
 
     try {
       const audio = selectedDeviceId
@@ -203,6 +209,10 @@ export function useMicRecorder(): MicRecorder {
       startedAtRef.current = performance.now();
       accumulatedRef.current = 0;
       setElapsedSec(0);
+      if (resultUrlRef.current) {
+        URL.revokeObjectURL(resultUrlRef.current);
+        resultUrlRef.current = null;
+      }
       setResult(null);
       setState("recording");
 
@@ -217,9 +227,14 @@ export function useMicRecorder(): MicRecorder {
       stream.getAudioTracks().forEach((track) => {
         track.onended = () => hardStop(true);
       });
+      return true;
     } catch (err) {
       streamRef.current?.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
+      recorderRef.current = null;
+      stopMeter();
+      stopTimer();
+      setState("idle");
       if (err instanceof DOMException && err.name === "NotAllowedError") {
         setPermission("denied");
         setError({
@@ -232,8 +247,11 @@ export function useMicRecorder(): MicRecorder {
         const e = toStudioError(err);
         setError({ code: e.code, message: e.message });
       }
+      return false;
+    } finally {
+      startingRef.current = false;
     }
-  }, [hardStop, refreshDevices, stopTimer, selectedDeviceId]);
+  }, [hardStop, refreshDevices, stopMeter, stopTimer, selectedDeviceId]);
 
   const pause = useCallback(() => {
     const rec = recorderRef.current;
@@ -274,9 +292,12 @@ export function useMicRecorder(): MicRecorder {
         setState("idle");
         return;
       }
+      if (resultUrlRef.current) URL.revokeObjectURL(resultUrlRef.current);
+      const url = URL.createObjectURL(blob);
+      resultUrlRef.current = url;
       setResult({
         blob,
-        url: URL.createObjectURL(blob),
+        url,
         name: `recording_${timestampSlug()}`,
         mime,
         durationSec,
@@ -290,12 +311,15 @@ export function useMicRecorder(): MicRecorder {
   }, [stopMeter, stopTimer, activeMime]);
 
   const reset = useCallback(() => {
-    if (result) URL.revokeObjectURL(result.url);
+    if (resultUrlRef.current) {
+      URL.revokeObjectURL(resultUrlRef.current);
+      resultUrlRef.current = null;
+    }
     setResult(null);
     setElapsedSec(0);
     setState("idle");
     setError(null);
-  }, [result]);
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -313,6 +337,10 @@ export function useMicRecorder(): MicRecorder {
       streamRef.current?.getTracks().forEach((t) => t.stop());
       const ctx = meterCtxRef.current;
       if (ctx) void ctx.close();
+      if (resultUrlRef.current) {
+        URL.revokeObjectURL(resultUrlRef.current);
+        resultUrlRef.current = null;
+      }
     };
   }, []);
 

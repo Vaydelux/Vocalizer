@@ -91,10 +91,10 @@ export function KaraokeView() {
   }, [activeIdx]);
 
   const startPerformance = async () => {
-    await rec.start();
-    // Capture the real playback position after getUserMedia resolves and the
-    // recording starts, not at Stop (which caused vocal misalignment).
-    performanceStartRef.current = playbackTimeRef.current;
+    const started = await rec.start();
+    // A permission denial or device failure does not start recording.
+    // Only capture a timeline offset after MediaRecorder has actually started.
+    if (started) performanceStartRef.current = playbackTimeRef.current;
   };
 
   const exportTake = () => {

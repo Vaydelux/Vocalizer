@@ -92,13 +92,17 @@ export async function runFfmpeg(op: FfmpegOp, emit: ProgressEmitter): Promise<Ff
     });
 
     proc.on("close", (code) => {
-      activeJobs.delete(op.jobId);
+      // Keep the handle registered through FFprobe validation and publication.
+      // Otherwise a user can cancel after FFmpeg exits but before the output
+      // becomes visible, and the cancellation is incorrectly reported lost.
       if (handle.aborted) {
+        activeJobs.delete(op.jobId);
         cleanupStagedOutput(stagedPath);
         reject(studioError("CANCELLED"));
         return;
       }
       if (code !== 0) {
+        activeJobs.delete(op.jobId);
         cleanupStagedOutput(stagedPath);
         const detail = stderr.slice(-400);
         reject(studioError("ENCODE_FAILED", `FFmpeg exited ${code}. ${detail}`));
@@ -107,7 +111,14 @@ export async function runFfmpeg(op: FfmpegOp, emit: ProgressEmitter): Promise<Ff
       // Verify the output: exists, non-zero size, decodable.
       verifyOutput(stagedPath)
         .then((verified) => {
+          if (handle.aborted) {
+            activeJobs.delete(op.jobId);
+            cleanupStagedOutput(stagedPath);
+            reject(studioError("CANCELLED"));
+            return;
+          }
           if (!verified.verified) {
+            activeJobs.delete(op.jobId);
             cleanupStagedOutput(stagedPath);
             reject(studioError("OUTPUT_EMPTY", "The encoded output failed audio verification."));
             return;
@@ -115,11 +126,13 @@ export async function runFfmpeg(op: FfmpegOp, emit: ProgressEmitter): Promise<Ff
           try {
             publishStagedOutput(stagedPath, op.outputPath);
           } catch (error) {
+            activeJobs.delete(op.jobId);
             cleanupStagedOutput(stagedPath);
             reject(studioError("PERMISSION_DENIED",
               `Could not publish the verified audio file without overwriting another file: ${String(error)}`));
             return;
           }
+          activeJobs.delete(op.jobId);
           emit({ jobId: op.jobId, progress: 1, stage: "Completed" });
           resolve({
             outputPath: op.outputPath,
@@ -129,8 +142,9 @@ export async function runFfmpeg(op: FfmpegOp, emit: ProgressEmitter): Promise<Ff
           });
         })
         .catch((err) => {
+          activeJobs.delete(op.jobId);
           cleanupStagedOutput(stagedPath);
-          reject(err);
+          reject(handle.aborted ? studioError("CANCELLED") : err);
         });
     });
   });
@@ -141,6 +155,11 @@ export function cancelJob(jobId: string): boolean {
   const handle = activeJobs.get(jobId);
   if (!handle) return false;
   handle.aborted = true;
+  // Encoding may already have exited while output verification is still in
+  // flight. The aborted flag is enough; do not kill an unrelated recycled PID.
+  if (handle.proc.exitCode !== null || handle.proc.signalCode !== null) {
+    return true;
+  }
   try {
     if (process.platform === "win32") {
       // Windows: kill the whole tree via taskkill (FFmpeg may spawn children).
