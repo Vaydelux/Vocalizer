@@ -115,6 +115,7 @@ interface PendingRequest {
   resolve: (r: WorkerResponse) => void;
   reject: (err: unknown) => void;
   profile?: "low-memory" | "balanced" | "thorough";
+  profile?: "low-memory" | "balanced" | "thorough";
   onProgress?: (p: { progress: number | null; stage: string }) => void;
 }
 
