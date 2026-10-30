@@ -117,6 +117,21 @@ interface PendingRequest {
   onProgress?: (p: { progress: number | null; stage: string }) => void;
 }
 
+/** Kill the frozen worker and its inference child on Windows.
+ * Terminating only the parent can strand a PyInstaller --job subprocess. */
+function terminateWorkerTree(child: ChildProcess): void {
+  if (process.platform === "win32" && child.pid) {
+    const killer = spawn("taskkill", ["/PID", String(child.pid), "/T", "/F"], {
+      shell: false, windowsHide: true, stdio: "ignore",
+    });
+    killer.once("error", () => {
+      try { child.kill(); } catch { /* already exited */ }
+    });
+  } else {
+    try { child.kill(); } catch { /* already exited */ }
+  }
+}
+
 let workerProc: ChildProcess | null = null;
 let ready = false;
 let startingWorker: Promise<void> | null = null;
@@ -157,7 +172,7 @@ async function startWorker(): Promise<void> {
     if (workerProc !== child) return;
     ready = false;
     failAll(studioError("INFERENCE_FAILED", description));
-    child.kill();
+    terminateWorkerTree(child);
   };
   child.stdout?.on("data", (chunk: Buffer) => {
     if (workerProc !== child) return;
@@ -212,7 +227,7 @@ async function startWorker(): Promise<void> {
     const timeout = setTimeout(() => {
       clearInterval(poll);
       if (workerProc === startingProcess) {
-        startingProcess?.kill();
+        if (startingProcess) terminateWorkerTree(startingProcess);
       }
       reject(studioError("RUNTIME_UNAVAILABLE", "Worker did not become ready in time."));
     }, 30000);
@@ -322,20 +337,20 @@ export function cancelSeparation(requestId: string): boolean {
 
 /** Shut the worker down cleanly on app quit. */
 export function shutdownWorker(): void {
-  if (!workerProc) return;
+  const shuttingDown = workerProc;
+  if (!shuttingDown) return;
   try {
     send({ type: "shutdown" });
   } catch {
-    /* ignore */
+    // The transport is already broken; the guarded timeout still cleans up.
   }
   setTimeout(() => {
-    try {
-      workerProc?.kill("SIGKILL");
-    } catch {
-      /* already dead */
-    }
+    // Never kill a NEW worker that was started after this one exited.
+    if (workerProc !== shuttingDown) return;
+    terminateWorkerTree(shuttingDown);
     workerProc = null;
     ready = false;
+    failAll(studioError("RUNTIME_UNAVAILABLE", "Inference worker was shut down."));
   }, 2000);
 }
 
