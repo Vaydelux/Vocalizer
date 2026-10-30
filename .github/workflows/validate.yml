@@ -37,3 +37,5 @@ jobs:
         run: bun run electron:build-renderer
       - name: Compile Electron
         run: bun run electron:compile
+      - name: Test safe native export finalization
+        run: node scripts/test-safe-export.mjs
