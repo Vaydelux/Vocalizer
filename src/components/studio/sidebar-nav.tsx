@@ -130,7 +130,7 @@ export function SidebarNav({ mobile = false, onNavigate }: { mobile?: boolean; o
                             <p className="opacity-80">Open the page and select Quick Help for every control.</p>
                           </TooltipContent>
                         </Tooltip>
-                      )
+                      )}
                     </li>
                   );
                 })}
