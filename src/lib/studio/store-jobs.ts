@@ -164,9 +164,22 @@ export const useJobs = create<JobStore>((set, get) => ({
       error: null,
       result: null,
     };
-    set((s) => ({
-      jobs: [...s.jobs, job].slice(Math.max(0, s.jobs.length + 1 - MAX_JOBS)),
-    }));
+    set((s) => {
+      const next = [...s.jobs, job];
+      // Only trim TERMINAL jobs. Evicting a live job makes it invisible to
+      // cancellation and hides its output while the native process still runs.
+      while (next.length > MAX_JOBS) {
+        const index = next.findIndex((item) =>
+          ["completed", "failed", "cancelled"].includes(item.state)
+        );
+        if (index < 0) break;
+        const [removed] = next.splice(index, 1);
+        if (removed.result?.url.startsWith("blob:")) {
+          URL.revokeObjectURL(removed.result.url);
+        }
+      }
+      return { jobs: next };
+    });
     queueOrder.push(id);
     scheduleNext();
     return id;
@@ -194,7 +207,7 @@ export const useJobs = create<JobStore>((set, get) => ({
       jobs: s.jobs.filter((j) => {
         if (["completed", "failed", "cancelled"].includes(j.state)) {
           // Temp-file cleanup: revoke the finalized output's object URL.
-          if (j.result?.url) URL.revokeObjectURL(j.result.url);
+          if (j.result?.url.startsWith("blob:")) URL.revokeObjectURL(j.result.url);
           return false;
         }
         return true;
