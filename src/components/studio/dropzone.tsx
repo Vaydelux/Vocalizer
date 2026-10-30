@@ -6,7 +6,7 @@
  */
 
 import { useCallback, useRef, useState } from "react";
-import { FileAudio, CloudUpload } from "lucide-react";
+import { FileAudio, FolderUp } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTracks } from "@/lib/studio/store-tracks";
 import { Button } from "@/components/ui/button";
@@ -32,7 +32,8 @@ export function Dropzone({ compact = false }: { compact?: boolean }) {
     <div
       role="button"
       tabIndex={0}
-      aria-label="Import audio files"
+      aria-label="Import local audio files"
+      aria-describedby="vocalizer-import-help"
       onClick={() => inputRef.current?.click()}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
@@ -66,15 +67,15 @@ export function Dropzone({ compact = false }: { compact?: boolean }) {
         {dragging ? (
           <FileAudio className={cn("text-primary", compact ? "h-4 w-4" : "h-5 w-5")} aria-hidden />
         ) : (
-          <CloudUpload className={cn("text-primary", compact ? "h-4 w-4" : "h-5 w-5")} aria-hidden />
+          <FolderUp className={cn("text-primary", compact ? "h-4 w-4" : "h-5 w-5")} aria-hidden />
         )}
       </div>
       <div>
         <p className="text-sm font-medium text-foreground">
           {dragging ? "Drop to import" : "Import audio files"}
         </p>
-        <p className="mt-0.5 text-xs text-muted-foreground">
-          Drag &amp; drop or click to browse · MP3, WAV, FLAC, M4A, OGG and more
+        <p id="vocalizer-import-help" className="mt-0.5 text-xs text-muted-foreground">
+          Drag &amp; drop or press Enter to browse · MP3, WAV, FLAC, M4A, OGG · 500 MB per file
         </p>
       </div>
       <input
@@ -90,9 +91,9 @@ export function Dropzone({ compact = false }: { compact?: boolean }) {
         }}
       />
       {!compact && (
-        <Button variant="ghost" size="sm" tabIndex={-1} className="pointer-events-none text-xs text-muted-foreground">
-          Files stay on this device — nothing is uploaded
-        </Button>
+        <span className="rounded-md bg-muted/50 px-3 py-1.5 text-xs text-muted-foreground">
+          Local only · files are not uploaded
+        </span>
       )}
     </div>
   );
