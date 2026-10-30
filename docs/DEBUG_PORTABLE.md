@@ -5,7 +5,7 @@ This build is a **portable-folder / unpacked Electron application**. It does not
 ## Download the GitHub Actions artifact
 
 1. Open [Windows Debug EXE](https://github.com/Vaydelux/Vocalizer/actions/workflows/windows-preview.yml).
-2. Select a successful run on `phase2/windows-inference-integration`.
+2. Select a successful run on `main` (or the development PR branch while the PR is open).
 3. Download the date-named **Vocalizer-YYYY-MM-DD-Windows-x64-Debug** artifact. The downloaded GitHub artifact contains **Vocalizer-YYYY-MM-DD-Windows-x64-Debug.zip**; extract that inner ZIP as well.
 4. Extract its entire ZIP to an ordinary writable folder on Windows x64.
 5. Double-click **Run-Vocalizer-Debug.cmd** to launch with DevTools and a diagnostic log, or **Vocalizer.exe** for ordinary operation.
