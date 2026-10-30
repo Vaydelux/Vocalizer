@@ -3,7 +3,7 @@ name: Windows Preview (unsigned, no model weights)
 on:
   workflow_dispatch:
   push:
-    branches: [release/initial-windows-readiness]
+    branches: [release/initial-windows-readiness, phase2/windows-inference-integration]
 
 permissions:
   contents: read
