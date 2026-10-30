@@ -16,7 +16,7 @@ try {
   await assert.rejects(stageRecordingBytes(root,"test01","ogg",ogg), /EEXIST/);
   await assert.rejects(stageRecordingBytes(root,"../other","ogg",ogg), /Invalid/);
   await assert.rejects(stageRecordingBytes(root,"test02","m4a",ogg), /container/);
-  await assert.rejects(stageRecordingBytes(root,"test02","ogg",new Uint8Array()), /between/);
+  await assert.rejects(stageRecordingBytes(root,"test02","ogg",new Uint8Array()), /1 byte to 64 MiB/);
   const second = await stageRecordingBytes(root,"test03","ogg",ogg);
   await discardRecordingFile(second);
   await assert.rejects(fs.stat(second), /ENOENT/);
