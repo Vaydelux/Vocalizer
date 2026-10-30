@@ -198,6 +198,9 @@ export async function nativeMixTask(
     const format = mime.includes("webm") ? "webm" : mime.includes("ogg") ? "ogg" :
       mime.includes("mp4") || mime.includes("m4a") ? "m4a" : null;
     if (!format) throw studioError("UNSUPPORTED_MEDIA", "Unsupported microphone recording format.");
+    if (input.micFile.size === 0 || input.micFile.size > 64 * 1024 * 1024) {
+      throw studioError("INPUT_INVALID", "Microphone recording must be under 64 MiB. Save and re-import longer takes.");
+    }
     if (ctx.signal.aborted) throw studioError("CANCELLED", "Mix cancelled before recording staging.");
     const bytes = new Uint8Array(await input.micFile.arrayBuffer());
     await api.stageRecording({ jobId: ctx.jobId, format, bytes });

@@ -121,16 +121,24 @@ function createWindow(): void {
         try {
           const fixture = process.env.VOCALIZER_SMOKE_AUDIO;
           const exportPath = process.env.VOCALIZER_SMOKE_EXPORT;
-          if (!fixture || !exportPath) {
+          const micFixture = process.env.VOCALIZER_SMOKE_RECORDING;
+          const mixPath = process.env.VOCALIZER_SMOKE_MIX;
+          if (!fixture || !exportPath || !micFixture || !mixPath) {
             throw new Error("Windows smoke fixture paths are not configured.");
           }
+          // The microphone fixture is synthetic; passing it through the
+          // renderer validates typed IPC byte transfer and the private staging
+          // bridge without requiring a physical audio device on CI.
+          const recordedBase64 = fs.readFileSync(micFixture).toString("base64");
+          if (recordedBase64.length > 1_000_000) throw new Error("Smoke mic fixture is too large.");
           const result: {
             hasBridge: boolean; hasRenderer: boolean;
             hasFfmpeg: boolean; hasWorker: boolean; nativeAudioVerified: boolean;
+            nativeMicrophoneMixVerified: boolean;
           } = await mainWindow!.webContents.executeJavaScript(`(async () => {
             const bridge = window.studio;
             if (!bridge || bridge.isNative !== true) {
-              return { hasBridge: false, hasRenderer: false, hasFfmpeg: false, hasWorker: false, nativeAudioVerified: false };
+              return { hasBridge: false, hasRenderer: false, hasFfmpeg: false, hasWorker: false, nativeAudioVerified: false, nativeMicrophoneMixVerified: false };
             }
             const system = await bridge.systemInfo();
             const inference = await bridge.inferenceStatus();
@@ -143,6 +151,19 @@ function createWindow(): void {
               startSec: 0, endSec: 0.7
             });
             const output = await bridge.probeMetadata({ path: result.outputPath });
+            // Exercise the same IPC staged-audio path used by Karaoke rather
+            // than passing a synthetic microphone recording as a raw path.
+            const bytes = Uint8Array.from(atob(${JSON.stringify(recordedBase64)}), (char) => char.charCodeAt(0));
+            const staged = await bridge.stageRecording({jobId: "windows-smoke-mix", format:"webm", bytes});
+            const mixed = await bridge.runFfmpeg({
+              kind: "mix", jobId: "windows-smoke-mix",
+              instrumentalPath: fixture, vocalPath: "__recording__",
+              vocalStartSec: 0.3, outputPath: ${JSON.stringify(mixPath)},
+              outputFormat: "wav"
+            });
+            const mixMeta = await bridge.probeMetadata({path: mixed.outputPath});
+            // Main already removed the private temp recording in its finally.
+            const discarded = await bridge.discardRecording({jobId:"windows-smoke-mix"});
             return {
               hasBridge: true,
               hasRenderer: !!document.querySelector("main") && (document.body?.innerText?.length ?? 0) > 100,
@@ -150,10 +171,14 @@ function createWindow(): void {
               hasWorker: inference.workerAvailable === true,
               nativeAudioVerified: source.duration > 1 &&
                 result.verified === true && result.sizeBytes > 0 &&
-                output.duration > 0.5 && output.duration < 1
+                output.duration > 0.5 && output.duration < 1,
+              nativeMicrophoneMixVerified: staged.staged === true && mixed.verified === true &&
+                mixed.sizeBytes > 0 && mixMeta.duration > 1.5 &&
+                discarded.discarded === false
             };
           })()`, true);
-          if (!result.hasBridge || !result.hasRenderer || !result.hasFfmpeg || !result.hasWorker || !result.nativeAudioVerified) {
+          if (!result.hasBridge || !result.hasRenderer || !result.hasFfmpeg || !result.hasWorker ||
+              !result.nativeAudioVerified || !result.nativeMicrophoneMixVerified) {
             throw new Error("Packaged renderer, preload, FFmpeg or worker unavailable: " + JSON.stringify(result));
           }
           console.log("SMOKE_PASS " + JSON.stringify(result));

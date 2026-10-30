@@ -120,6 +120,10 @@ jobs:
           $env:VOCALIZER_SMOKE_EXPORT = Join-Path $env:RUNNER_TEMP "vocalizer-smoke-output.wav"
           & (Join-Path $root "resources/binaries/ffmpeg.exe") -hide_banner -loglevel error -nostdin -n -f lavfi -i "sine=frequency=440:duration=2" -c:a pcm_s16le $env:VOCALIZER_SMOKE_AUDIO
           if ($LASTEXITCODE -ne 0) { throw "Could not generate synthetic smoke audio" }
+          $env:VOCALIZER_SMOKE_RECORDING = Join-Path $env:RUNNER_TEMP "vocalizer-smoke-microphone.webm"
+          $env:VOCALIZER_SMOKE_MIX = Join-Path $env:RUNNER_TEMP "vocalizer-smoke-mix-output.wav"
+          & (Join-Path $root "resources/binaries/ffmpeg.exe") -hide_banner -loglevel error -nostdin -n -f lavfi -i "sine=frequency=880:duration=1" -c:a libopus -f webm $env:VOCALIZER_SMOKE_RECORDING
+          if ($LASTEXITCODE -ne 0) { throw "Could not generate synthetic WebM microphone fixture" }
           # Test actual packaged Electron UI, preload, native FFmpeg/FFprobe,
           # worker detection, and media export. Not a real AI model test.
           $stdout = Join-Path $env:RUNNER_TEMP "vocalizer-smoke.stdout.log"
