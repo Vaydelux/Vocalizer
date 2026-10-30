@@ -202,9 +202,10 @@ export function SettingsView() {
               </Select>
             </div>
             <div className="space-y-1.5">
-              <Label className="text-xs">Fallback policy (applies when AI processing ships)</Label>
+              <Label className="text-xs">Fallback policy (future feature; inactive)</Label>
               <Select
                 value={s.fallbackPolicy}
+                disabled
                 onValueChange={(v) => update({ fallbackPolicy: v as "cpu-then-embedded" | "embedded-only" | "error" })}
               >
                 <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
@@ -215,8 +216,8 @@ export function SettingsView() {
                 </SelectContent>
               </Select>
               <p className="text-[11px] text-muted-foreground">
-                Stored now so the policy is stable when inference lands. Fallback is currently “not
-                ready — no installed model”, and the queue reports a real error instead of guessing.
+                The current CPU Remover ignores this future policy. Select the exact
+                checksum-verified local ONNX checkpoint in Remover; no fallback is bundled.
               </p>
             </div>
           </CardContent>

@@ -160,7 +160,7 @@ export function ModelsView() {
     <div>
       <PageHeader
         title="Model Manager"
-        description="Universal registry: typed adapter contracts, strict manifest validation, real local-file inspection, and the protected built-in fallback. No model downloads or inference in this phase."
+        description="Inspect and register model metadata for future integration. Current real two-stem CPU inference uses the separate, checksum-verified checkpoint picker in Remover; model registrations here are not executable."
       />
 
       {/* A. Built-in model */}
@@ -200,7 +200,7 @@ export function ModelsView() {
       {/* B. Installed models + C. details */}
       <Card className="mb-4">
         <CardHeader className="pb-2">
-          <CardTitle className="text-sm">B · Installed models ({userModels.length})</CardTitle>
+          <CardTitle className="text-sm">B · Registered models (metadata only: {userModels.length})</CardTitle>
         </CardHeader>
         <CardContent>
           {userModels.length === 0 ? (
