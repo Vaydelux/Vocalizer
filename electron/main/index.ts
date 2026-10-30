@@ -15,10 +15,25 @@
 
 import { app, BrowserWindow, shell, Menu, protocol, net } from "electron";
 import * as path from "node:path";
+import * as fs from "node:fs";
 import { pathToFileURL } from "node:url";
 import { registerIpcHandlers } from "./ipc";
 
 export const isPackaged = app.isPackaged;
+const debugEnabled = process.argv.includes("--vocalizer-debug");
+
+/** Opt-in diagnostics without weakening the secure renderer configuration. */
+function debugLog(message: string): void {
+  if (!debugEnabled) return;
+  try {
+    const logs = path.join(app.getPath("userData"), "logs");
+    fs.mkdirSync(logs, { recursive: true });
+    fs.appendFileSync(path.join(logs, "debug.log"), `[${new Date().toISOString()}] ${message}\n`, "utf8");
+  } catch (error) {
+    console.error("Cannot write debug log:", error);
+  }
+}
+
 
 // Register the privileged `las://` scheme BEFORE app.ready so it supports
 // fetch, streaming, and secure context (needed to serve the bundled renderer
@@ -74,12 +89,22 @@ function createWindow(): void {
     return { action: "deny" };
   });
 
-  mainWindow.on("ready-to-show", () => mainWindow?.show());
+  mainWindow.on("ready-to-show", () => {
+    mainWindow?.show();
+    debugLog("Main window ready-to-show");
+    if (debugEnabled) mainWindow?.webContents.openDevTools({ mode: "detach" });
+  });
+  mainWindow.webContents.on("did-fail-load", (_event, code, description, url) => {
+    debugLog(`Renderer load failure: code=${code} url=${url} detail=${description}`);
+  });
+  mainWindow.webContents.on("render-process-gone", (_event, details) => {
+    debugLog(`Renderer process gone: reason=${details.reason} exit=${details.exitCode}`);
+  });
 
   if (isPackaged) {
     // Load the renderer through the privileged `las://` protocol so Next.js's
     // absolute /_next/... asset URLs resolve to bundled files (file:// would break).
-    void mainWindow.loadURL("las://renderer/index.html");
+    void mainWindow.loadURL("las://renderer/index.html").catch((error) => debugLog(`UI load rejected: ${String(error)}`));
   } else {
     void mainWindow.loadURL("http://localhost:3000");
     mainWindow.webContents.openDevTools({ mode: "detach" });
@@ -98,6 +123,7 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   app.whenReady().then(() => {
+    debugLog(`Starting Vocalizer (packaged=${app.isPackaged}, resources=${process.resourcesPath})`);
     // Privileged custom protocol: serves bundled static assets under las://renderer/.
     // Next.js static export uses absolute /_next/... URLs; under file:// these
     // resolve to the filesystem root and 404. The las:// scheme maps every
