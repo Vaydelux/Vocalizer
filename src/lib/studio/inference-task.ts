@@ -128,6 +128,7 @@ export function makeInferenceTask(req: SeparationRequest): JobTask {
         deviceUsed: result.deviceUsed,
       };
     } catch (err) {
+      if (ctx.signal.aborted) throw studioError("CANCELLED", "The inference job was cancelled.");
       throw toStudioError(err);
     } finally {
       ctx.signal.removeEventListener("abort", onAbort);
