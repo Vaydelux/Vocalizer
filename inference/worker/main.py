@@ -336,6 +336,11 @@ def handle_separate(req: dict[str, Any]) -> None:
 
 
 def handle_cancel(req: dict[str, Any]) -> None:
+    # Only the owner of the active request may cancel it. A stale job ID must
+    # never interrupt a later, unrelated separation job.
+    if not runner.active or runner.request_id != req.get("requestId"):
+        emit(ERROR_MSG(req.get("requestId", "?"), "unknown", "No matching active separation job to cancel."))
+        return
     if runner.cancel():
         with runner.write_lock:
             emit(ERROR_MSG(runner.request_id or req.get("requestId", "?"), "cancelled", "Separation cancelled."))

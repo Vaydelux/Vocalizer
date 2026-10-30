@@ -31,6 +31,8 @@ jobs:
         run: bun run typecheck:electron
       - name: Verify Python syntax
         run: python -m compileall -q inference/worker scripts/verify-separation.py
+      - name: Worker protocol and cancellation tests
+        run: python -m unittest discover -s tests -p "test_*.py" -v
       - name: Build Electron static renderer
         run: bun run electron:build-renderer
       - name: Compile Electron
