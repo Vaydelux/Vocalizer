@@ -212,11 +212,23 @@ jobs:
         run: |
           set -euo pipefail
           tag="debug-$BUILD_DATE"
-          if ! gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            # Same-day builds replace a DRAFT artifact. Never modify a release
+            # that someone intentionally published, and never keep its old
+            # source-code target while replacing the ZIP with a newer commit.
+            is_draft="$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft')"
+            if [[ "$is_draft" != "true" ]]; then
+              echo "::error::Refusing to overwrite published release $tag"
+              exit 1
+            fi
+            gh release edit "$tag" --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" --draft --prerelease \
+              --notes "Unsigned Windows debug preview. Built from commit $GITHUB_SHA, Actions run $GITHUB_RUN_ID. Portable folder ZIP; no installer. No bundled model weights. Clean-Windows GUI, real microphone, and real ONNX inference not yet accepted. Do not publish before licensing and runtime gates pass."
+          else
             gh release create "$tag" --repo "$GITHUB_REPOSITORY" \
               --target "$GITHUB_SHA" --title "Vocalizer $BUILD_DATE Windows Debug" \
               --draft --prerelease \
-              --notes "Unsigned Windows debug preview. Portable folder ZIP; no installer needed. Not validated on a clean Windows PC. No bundled model weights. Do not publish until licensing and runtime tests are approved."
+              --notes "Unsigned Windows debug preview. Built from commit $GITHUB_SHA, Actions run $GITHUB_RUN_ID. Portable folder ZIP; no installer. No bundled model weights. Clean-Windows GUI, real microphone, and real ONNX inference not yet accepted. Do not publish before licensing and runtime gates pass."
           fi
           gh release upload "$tag" release-files/* --repo "$GITHUB_REPOSITORY" --clobber
 
