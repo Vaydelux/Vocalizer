@@ -7,14 +7,19 @@
  */
 
 import { LoaderCircle } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 import { isNative } from "@/lib/studio/native";
 import { useJobs } from "@/lib/studio/store-jobs";
 import { APP_VERSION } from "@/lib/studio/app-info";
 
+const subscribeNative = () => () => {};
+const nativeSnapshot = () => isNative();
+const serverSnapshot = () => false;
+
 export function StatusFooter() {
-  const [desktopRuntime, setDesktopRuntime] = useState(false);
-  useEffect(() => setDesktopRuntime(isNative()), []);
+  // A stable server snapshot avoids hydration mismatch. The native preload
+  // is available on the first real browser render after hydration.
+  const desktopRuntime = useSyncExternalStore(subscribeNative, nativeSnapshot, serverSnapshot);
   const jobs = useJobs((s) => s.jobs);
   const active = jobs.filter((j) => ["queued", "preparing", "running", "cancelling"].includes(j.state));
   const current = active.find((j) => j.state === "running") ?? active[0];
