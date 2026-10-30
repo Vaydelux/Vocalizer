@@ -22,6 +22,33 @@ fabricated results.
 A 10 s test signal was separated into two real, decodable, non-identical,
 non-silent stems (vocals + instrumental) in **~25 s** on CPU.
 
+### Phase 5.2 live verification (parent/child architecture)
+
+The full protocol was re-verified end-to-end against the real model through the
+subprocess-per-job architecture introduced in Phase 5.2:
+
+| Check | Result |
+|---|---|
+| `init` → `ready` | real runtimes reported (onnxruntime 1.31.1, torch 2.15.0+cpu) |
+| Stage progress | `Preparing` → `Loading model` → `Running inference` (all `progress: null`, indeterminate — never fabricated), then measured `0.0/0.5/1.0` during `Verifying outputs` |
+| `cancel` mid-inference | **0.06 s latency**, `code:"cancelled"`, zero leftover partial stems |
+| `cancel` with no active job | protocol-legal `code:"unknown"` error response |
+| `separate` → `result` | 2 FFprobe-verified stems, distinct MD5s, correct duration |
+| `shutdown` racing completion | completed stems protected via `result_paths`, never deleted |
+
+Defects found and fixed by this verification: uninitialized `JobRunner` state
+(crashed `cancel` before the first job), dropped `segmentSize` field (child was
+silently pinned to 256), `input-invalid` error code not in the protocol enum
+(message would be dropped by the Electron Zod parser), orphaned child on stdin
+EOF, and noisy BrokenPipeError crashes when the parent disappears.
+
+### Memory constraint (sandbox only)
+
+This 4 GB cgroup sandbox (with the dev server resident) cannot fit the default
+`segmentSize: 256` for longer clips alongside the parent process — the child is
+OOM-killed by the kernel. Pass a smaller `segmentSize` (e.g. 128) in constrained
+environments; real Windows hardware is unaffected.
+
 ## Standalone verification (no Electron required)
 
 ```bash
@@ -82,10 +109,15 @@ resources/models/default/
 └── manifest.json
 ```
 
-`electron-builder.yml` `extraResources` already includes `resources/binaries/`
-and would include `resources/inference/` + `resources/models/default/`. The
-Electron worker manager (`electron/main/services/inference-worker.ts`) resolves
-the worker + Python runtime from `process.resourcesPath/inference/`.
+`electron-builder.yml` `extraResources` maps `inference-dist/windows-x64/` →
+`resources/inference/` inside the installed app, plus `resources/models/default/`
+after the licensing gate. The Electron worker manager
+(`electron/main/services/inference-worker.ts`) resolves, in order: the frozen
+onedir executable (`<resourcesPath>/inference/inference-worker.exe`, or
+`inference-dist/windows-x64/` for dev builds), then a script + interpreter pair
+(bundled runtime Python, or `LAS_INFERENCE_PYTHON` as an explicit dev opt-in).
+`isWorkerAvailable()` is true only when one of those layouts actually exists on
+disk.
 
 **This packaging was NOT produced or tested here** — no Windows toolchain,
 PyInstaller-on-Windows, or display to launch Electron exists in this Linux

@@ -60,8 +60,13 @@ def run_job_child(job_file: str) -> int:
     from errors import WorkerError
 
     def emit(resp: dict[str, Any]) -> None:
-        sys.stdout.write(serialize_response(resp) + "\n")
-        sys.stdout.flush()
+        try:
+            sys.stdout.write(serialize_response(resp) + "\n")
+            sys.stdout.flush()
+        except BrokenPipeError:
+            # The parent is gone (crashed/exited) — nothing left to report to.
+            # Exit quietly instead of crashing through the inference stack.
+            sys.exit(3)
 
     request_id = req["requestId"]
     service = SeparatorService()
@@ -119,6 +124,13 @@ class JobRunner:
         self.job_start: float = 0.0
         self.cancelled = False
         self.write_lock = threading.Lock()
+        # Initialize ALL mutable job state here — `cancel`/`shutdown` may arrive
+        # before the first `separate`, and touching an unset attribute would
+        # crash the handler and leave the request unanswered (found by live
+        # protocol testing in Phase 5.2).
+        self.completed = False
+        self.result_paths: set[str] = set()
+        self._job_file: str | None = None
 
     @property
     def active(self) -> bool:
@@ -139,6 +151,11 @@ class JobRunner:
             "requestedStems": req["requestedStems"],
             "outputFormat": req.get("outputFormat", "wav"),
             "device": req.get("device", "cpu"),
+            # Forward the optional inference knob — dropping it here would
+            # silently pin the child to the 256 default (found by live testing:
+            # a 128 request kept running at 256 and OOM-killed in the 4GB
+            # sandbox cgroup).
+            "segmentSize": int(req.get("segmentSize", 256)),
         }
         fd, job_file = tempfile.mkstemp(prefix="las-job-", suffix=".json")
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
@@ -359,6 +376,13 @@ def parent_main() -> None:
         except Exception as e:  # noqa: BLE001 — the parent must survive handler errors
             print(f"handler error for {req.get('type')}: {e}\n{traceback.format_exc()}", file=sys.stderr, flush=True)
     print("stdin closed, worker exiting", file=sys.stderr, flush=True)
+    # EOF on stdin means the Electron side (or test driver) is gone. Never
+    # orphan a running inference child — cancel it (kills the child + cleans
+    # partial outputs) before exiting. Found by live testing in Phase 5.2: a
+    # driver hang-up left the child burning CPU on a broken pipe.
+    if runner.active:
+        print("stdin EOF with active job — cancelling before exit", file=sys.stderr, flush=True)
+        runner.cancel()
 
 
 def main() -> None:
