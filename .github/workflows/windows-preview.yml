@@ -1,4 +1,4 @@
-name: Windows Preview (unsigned, no model weights)
+name: Windows Debug EXE (no installer)
 
 on:
   workflow_dispatch:
@@ -71,18 +71,43 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Prepare preview icon
         run: python scripts/create-preview-icon.py
-      - name: Build Windows NSIS installer
+      - name: Build unpacked Windows debug executable
         shell: pwsh
         run: |
-          bun run dist:win
+          bun run dist:win:debug
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $artifacts = @(Get-ChildItem release -Filter "*setup.exe")
-          if ($artifacts.Count -eq 0) { throw "No NSIS installer was produced" }
-          Get-FileHash $artifacts[0].FullName -Algorithm SHA256
-      - name: Upload internal preview (NOT an offline AI release)
+          $root = "release/win-unpacked"
+          $exe = Join-Path $root "Vocalizer.exe"
+          foreach ($required in @(
+            $exe,
+            (Join-Path $root "resources/app.asar"),
+            (Join-Path $root "resources/inference/inference-worker.exe"),
+            (Join-Path $root "resources/binaries/ffmpeg.exe"),
+            (Join-Path $root "resources/binaries/ffprobe.exe")
+          )) {
+            if (!(Test-Path -LiteralPath $required -PathType Leaf)) { throw "Missing debug runtime file: $required" }
+          }
+          @'
+          @echo off
+          cd /d "%~dp0"
+          start "" "%~dp0Vocalizer.exe" --vocalizer-debug
+          '@ | Set-Content -Encoding ASCII (Join-Path $root "Run-Vocalizer-Debug.cmd")
+          @'
+          VOCALIZER 0.3.0 - WINDOWS X64 UNPACKED DEBUG BUILD
+          Extract the entire ZIP. Keep the resources folder beside Vocalizer.exe.
+          Run "Run-Vocalizer-Debug.cmd" to open the app with developer tools,
+          or double-click Vocalizer.exe to run normally.
+          No installer is required. No default AI model weights are bundled.
+          This unsigned build has not completed Windows GUI/runtime acceptance.
+          '@ | Set-Content -Encoding UTF8 (Join-Path $root "README-DEBUG.txt")
+          Get-FileHash -Algorithm SHA256 $exe | Format-List
+          Write-Host "Unpacked debug EXE created at $exe"
+      - name: Upload unpacked debug EXE (no installer)
         uses: actions/upload-artifact@v4
         with:
-          name: vocalizer-windows-unsigned-preview
-          path: release/*setup.exe
+          name: Vocalizer-0.3.0-windows-x64-debug
+          path: release/win-unpacked/
           if-no-files-found: error
+          include-hidden-files: true
+          compression-level: 1
           retention-days: 14
