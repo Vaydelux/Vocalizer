@@ -12,7 +12,7 @@ on:
         type: boolean
         default: false
   push:
-    branches: [main, phase3/windows-acceptance-and-stem-playback]
+    branches: [main, phase4/stability-recovery]
 
 permissions:
   contents: read

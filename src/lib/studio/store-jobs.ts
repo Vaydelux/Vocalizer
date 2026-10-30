@@ -16,6 +16,7 @@ import type { Job, JobCtx, JobResultFile, JobTask, JobType } from "./types";
 import { toStudioError, studioError } from "./errors";
 import { formatBytes } from "./format";
 import { useSettings } from "./store-settings";
+import { recordJobReceipt } from "./job-journal";
 
 const MAX_LOGS = 100;
 const MAX_JOBS = 60;
@@ -42,6 +43,11 @@ function patchJob(id: string, patch: Partial<Job>): void {
   useJobs.setState((s) => ({
     jobs: s.jobs.map((j) => (j.id === id ? { ...j, ...patch } : j)),
   }));
+  // Persist status transitions, not every progress update.
+  if (patch.state) {
+    const updated = useJobs.getState().jobs.find((job) => job.id === id);
+    if (updated) recordJobReceipt(updated);
+  }
 }
 
 function appendLog(id: string, msg: string): void {
@@ -180,6 +186,7 @@ export const useJobs = create<JobStore>((set, get) => ({
       }
       return { jobs: next };
     });
+    recordJobReceipt(job);
     queueOrder.push(id);
     scheduleNext();
     return id;
