@@ -83,8 +83,26 @@ async function verifyLocalMdxModel(modelId: string, modelPath: string, architect
   }
 }
 
-// Only completed, validated inference results may be revealed via IPC.
+// Only completed, validated inference results may be revealed or played.
 const completedInferenceStems = new Map<string, Map<string, string>>();
+const ALLOWED_STEMS = new Set(["Vocals", "Instrumental"]);
+
+/** Playback is restricted to exact paths already verified by the main process.
+ * This API is never exposed through the preload bridge. */
+export async function resolveCompletedStemForPlayback(jobId: string, stem: string): Promise<string | null> {
+  if (!ALLOWED_STEMS.has(stem)) return null;
+  const registered = completedInferenceStems.get(jobId)?.get(stem);
+  if (!registered) return null;
+  try {
+    const real = await fs.promises.realpath(registered);
+    const stat = await fs.promises.stat(real);
+    if (real !== registered || !stat.isFile()) return null;
+    if (![".wav", ".flac", ".mp3"].includes(path.extname(real).toLowerCase())) return null;
+    return real;
+  } catch {
+    return null;
+  }
+}
 export function registerIpcHandlers(_getMainWindow: () => BrowserWindow | null): void {
   /* --------------------------------- dialogs -------------------------------- */
   ipcMain.handle(IPC.DIALOG_OPEN_FILES, async (event, raw) => {
@@ -207,7 +225,15 @@ export function registerIpcHandlers(_getMainWindow: () => BrowserWindow | null):
       if (result.type === "result") {
         const root = await fs.promises.realpath(req.outputDir);
         const approved = new Map<string, string>();
+        const expected = new Set(req.requestedStems);
+        if (expected.size !== 2 || !expected.has("Vocals") || !expected.has("Instrumental") ||
+            result.stems.length !== expected.size) {
+          throw studioError("INFERENCE_FAILED", "The worker did not return the two expected stems.");
+        }
         for (const item of result.stems) {
+          if (!expected.has(item.stem) || approved.has(item.stem)) {
+            throw studioError("INFERENCE_FAILED", "The worker returned an unexpected or duplicate stem.");
+          }
           const resolved = await fs.promises.realpath(item.path);
           const relative = path.relative(root, resolved);
           const inside = Boolean(relative) && relative !== ".." &&
@@ -217,6 +243,9 @@ export function registerIpcHandlers(_getMainWindow: () => BrowserWindow | null):
             throw studioError("INFERENCE_FAILED", "Inference returned an output outside the approved folder or with an invalid format.");
           }
           approved.set(item.stem, resolved);
+        }
+        if (approved.size !== expected.size) {
+          throw studioError("INFERENCE_FAILED", "The worker did not return one file for each requested stem.");
         }
         completedInferenceStems.set(req.jobId, approved);
         if (completedInferenceStems.size > 50) {
