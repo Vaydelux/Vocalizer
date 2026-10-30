@@ -60,7 +60,7 @@ function JobCard({ jobId }: { jobId: string }) {
               {job.progress !== null ? ` · ${Math.round(job.progress * 100)}%` : job.state === "running" ? " · indeterminate" : ""}
             </p>
           </div>
-          {active && (
+          {active && job.state !== "cancelling" && (
             <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => cancel(job.id)} aria-label="Cancel job">
               <XCircle className="h-4 w-4" aria-hidden />
             </Button>
@@ -72,7 +72,7 @@ function JobCard({ jobId }: { jobId: string }) {
               className="h-8 gap-1.5 text-xs"
               onClick={() => downloadResult(job.result!.url, job.result!.name)}
             >
-              <Download className="h-3.5 w-3.5" aria-hidden /> Save {formatBytes(job.result.size)}
+              <Download className="h-3.5 w-3.5" aria-hidden /> {job.result.stemFiles ? "Save stem manifest" : `Save ${formatBytes(job.result.size)}`}
             </Button>
           )}
           {!active && (

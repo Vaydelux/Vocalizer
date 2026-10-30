@@ -34,7 +34,7 @@ export function InlineJob({ jobId, className }: { jobId: string; className?: str
           {job.stage ?? job.state}
           {job.progress !== null ? ` · ${Math.round(job.progress * 100)}%` : ""}
         </span>
-        {active && (
+        {active && job.state !== "cancelling" && (
           <Button variant="ghost" size="icon" className="h-7 w-7" aria-label="Cancel job" onClick={() => cancel(job.id)}>
             <XCircle className="h-4 w-4" aria-hidden />
           </Button>

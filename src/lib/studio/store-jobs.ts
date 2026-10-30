@@ -13,7 +13,7 @@
 import { create } from "zustand";
 import { toast } from "sonner";
 import type { Job, JobCtx, JobResultFile, JobTask, JobType } from "./types";
-import { toStudioError } from "./errors";
+import { toStudioError, studioError } from "./errors";
 import { formatBytes } from "./format";
 import { useSettings } from "./store-settings";
 
@@ -115,7 +115,10 @@ async function runJob(id: string, label: string): Promise<void> {
       });
     }
   } catch (err) {
-    const e = toStudioError(err);
+    // An explicit AbortSignal always wins over a late worker rejection.
+    // Electron IPC can stringify worker errors, so do not mark user-cancelled
+    // jobs as FAILED merely because IPC returned an opaque error object.
+    const e = ctrl.signal.aborted ? studioError("CANCELLED") : toStudioError(err);
     if (e.code === "CANCELLED") {
       patchJob(id, {
         state: "cancelled",

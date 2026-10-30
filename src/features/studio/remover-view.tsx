@@ -1,177 +1,283 @@
 "use client";
 
 /**
- * Remover — AI-ready UI for vocal/instrumental separation.
- * Until a compatible engine and model exist, separation is honestly unavailable.
- * No fake stems, no invented results, ever.
+ * Vocalizer Remover: truthful, local-only two-stem CPU preview.
+ * The registry does not imply that model weights are installed. Keep outputs
+ * tied to their source track, expose real queued/running/cancelled states, and
+ * refuse concurrent inference jobs against the single-worker runtime.
  */
 
-import { useEffect, useState } from "react";
-import { MicOff, ShieldAlert, FileAudio2 } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { FileAudio2, FolderOpen, LoaderCircle, MicOff, RefreshCcw, ShieldCheck } from "lucide-react";
 import { PageHeader } from "@/components/studio/page-header";
 import { EmptyState } from "@/components/studio/empty-state";
 import { TrackSelect } from "@/components/studio/track-select";
 import { CapabilityBanner } from "@/components/studio/capability-banner";
+import { InlineJob } from "@/components/studio/inline-job";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { getTrackById } from "@/lib/studio/store-tracks";
+import { useTracks } from "@/lib/studio/store-tracks";
 import { useUi } from "@/lib/studio/store-ui";
-import { useModels } from "@/lib/studio/store-models";
 import { useSettings } from "@/lib/studio/store-settings";
 import { makeInferenceTask } from "@/lib/studio/inference-task";
 import { useJobs } from "@/lib/studio/store-jobs";
 import { formatTime } from "@/lib/studio/format";
+import { native, isNative } from "@/lib/studio/native";
+
+const MODEL_NAME = "UVR-MDX-NET-Inst_HQ_5.onnx";
+const ACTIVE_STATES = new Set(["queued", "preparing", "running", "cancelling"]);
 
 export function RemoverView() {
   const preselected = useUi((s) => s.preselectedTrackId);
   const [trackId, setTrackId] = useState<string | null>(preselected);
-  const track = trackId ? getTrackById(trackId) : undefined;
+  const tracks = useTracks((s) => s.tracks);
+  const track = tracks.find((t) => t.id === trackId && t.status === "ready" && t.meta);
 
-  const builtin = useModels((s) => s.builtin);
-  const userModels = useModels((s) => s.userModels);
-  const resolveFor = useModels((s) => s.resolveFor);
-  const preferredModelId = useSettings((s) => s.preferredModelId);
-  const updateSettings = useSettings((s) => s.update);
   const exportFormat = useSettings((s) => s.exportFormat);
   const mp3Bitrate = useSettings((s) => s.mp3Bitrate);
+  const jobs = useJobs((s) => s.jobs);
   const enqueue = useJobs((s) => s.enqueue);
 
-  // Resolve the real availability of the selected model for vocal removal.
-  // Always unavailable in this build — but the reason is derived from the
-  // fallback resolver, not a static string.
-  const [resolutionReason, setResolutionReason] = useState<string>(
-    "Select a model when one becomes available in the Model Manager."
+  const activeInference = jobs.find((j) => j.type === "inference" && ACTIVE_STATES.has(j.state));
+  const completedStems = [...jobs].reverse().find((j) =>
+    j.type === "inference" &&
+    j.state === "completed" &&
+    j.result?.sourceTrackId === trackId &&
+    j.result.stemFiles?.length
   );
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const r = await resolveFor({
-        operation: "vocal-removal",
-        requiredStems: ["Vocals", "Instrumental"],
-        preferredModelId: preferredModelId,
-        device: null,
-      });
-      if (!cancelled) setResolutionReason("reason" in r ? r.reason : "Resolved.");
-    })();
-    return () => { cancelled = true; };
-  }, [preferredModelId, resolveFor, userModels.length]);
+  const [lastJobId, setLastJobId] = useState<string | null>(null);
+  const currentJob = lastJobId ? jobs.find((j) => j.id === lastJobId) : undefined;
 
-  const modelOptions = [
-    { id: builtin.id, name: builtin.name },
-    ...userModels.map((m) => ({ id: m.manifest.modelId, name: m.manifest.displayName })),
-  ];
-  const selectedModel = preferredModelId ?? null;
+  const [localModelPath, setLocalModelPath] = useState<string | null>(null);
+  const [localModelError, setLocalModelError] = useState<string | null>(null);
+  const [workerDetected, setWorkerDetected] = useState(false);
+  const [checkingRuntime, setCheckingRuntime] = useState(true);
+  const [revealError, setRevealError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (preselected) setTrackId(preselected);
+  }, [preselected]);
+
+  const refreshRuntime = useCallback(async () => {
+    const api = native();
+    if (!api) {
+      setWorkerDetected(false);
+      setCheckingRuntime(false);
+      return;
+    }
+    setCheckingRuntime(true);
+    try {
+      const status = await api.inferenceStatus();
+      setWorkerDetected(status.workerAvailable);
+    } catch {
+      setWorkerDetected(false);
+    } finally {
+      setCheckingRuntime(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshRuntime();
+    // A transient worker failure may recover when the user revisits the app.
+    const onFocus = () => { void refreshRuntime(); };
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [refreshRuntime]);
+
+  async function chooseModel() {
+    const api = native();
+    if (!api) return;
+    setLocalModelError(null);
+    try {
+      const files = await api.openFiles({
+        multiple: false,
+        filters: [{ name: "MDX-Net ONNX checkpoint", extensions: ["onnx"] }],
+      });
+      if (!files?.length) return;
+      const selected = files[0];
+      if (selected.split(/[\\/]/).pop() !== MODEL_NAME) {
+        setLocalModelPath(null);
+        setLocalModelError(`Select ${MODEL_NAME}. Other checkpoints have not been verified.`);
+        return;
+      }
+      // Validation happens in the privileged main process and Python worker
+      // before model loading; selecting a path does not confirm its checksum.
+      setLocalModelPath(selected);
+    } catch (error) {
+      setLocalModelError(error instanceof Error ? error.message : "The file picker failed.");
+    }
+  }
+
+  function startSeparation() {
+    if (!track || !workerDetected || !localModelPath || activeInference) return;
+    setRevealError(null);
+    const id = enqueue(
+      "inference",
+      `Separate ${track.name} (vocals and instrumental)`,
+      makeInferenceTask({
+        track,
+        requestedStems: ["Vocals", "Instrumental"],
+        preferredModelId: null,
+        device: "cpu",
+        outputFormat: exportFormat,
+        mp3Bitrate,
+        localModelPath,
+      })
+    );
+    setLastJobId(id);
+  }
 
   return (
-    <div>
+    <div className="space-y-5">
       <PageHeader
-        title="Remover"
-        description="Vocal and instrumental separation workspace. The interface and pipeline contracts are in place; inference activates when a compatible model and runtime are installed."
+        title="Vocal Remover"
+        description="Separate a local audio track into vocals and instrumental using the verified CPU inference path. No cloud uploads or simulated audio."
+        actions={
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => void refreshRuntime()}
+            disabled={checkingRuntime || !isNative()}
+            aria-label="Refresh inference worker status"
+          >
+            <RefreshCcw className={checkingRuntime ? "h-4 w-4 animate-spin" : "h-4 w-4"} aria-hidden />
+            Check runtime
+          </Button>
+        }
       />
 
-      {track ? (
-        <div className="space-y-4">
-          <div className="max-w-xl">
-            <TrackSelect value={trackId} onChange={setTrackId} ariaLabel="Track to process" />
-            {track.meta && (
-              <p className="mt-1.5 text-xs text-muted-foreground">
-                {formatTime(track.meta.duration)} · {track.meta.sampleRate ?? "?"} Hz · {track.meta.channels ?? "?"} ch
-              </p>
-            )}
-          </div>
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <span className={`inline-flex items-center rounded-full border px-2.5 py-1 ${workerDetected ? "border-emerald-500/30 text-emerald-600 dark:text-emerald-400" : "border-border text-muted-foreground"}`}>
+          {checkingRuntime ? "Checking inference files…" : workerDetected ? "CPU worker detected" : "CPU worker unavailable"}
+        </span>
+        <span className="rounded-full border border-border px-2.5 py-1 text-muted-foreground">Two-stem · CPU-only</span>
+        <span className="rounded-full border border-border px-2.5 py-1 text-muted-foreground">No default model bundled</span>
+      </div>
 
-          <CapabilityBanner tone="unavailable" title="Audio separation is not available yet. Install a compatible model when AI processing support is enabled.">
-            The reserved built-in model slot (“{builtin.name}”) is not installed in this phase, and no
-            bundled inference runtime exists in the current build. These controls stay inactive rather
-            than simulate output.
-          </CapabilityBanner>
+      <CapabilityBanner tone={workerDetected ? "info" : "unavailable"}
+        title={workerDetected ? "Ready for local checkpoint verification" : "Inference requires the packaged Windows worker"}>
+        This debug build does not contain model weights. Select your own lawful copy of
+        {" "}<strong>{MODEL_NAME}</strong>. The checksum is verified when processing starts.
+        Worker detection only confirms that runtime files exist; successful inference still needs a real test.
+      </CapabilityBanner>
 
-          <div className="grid gap-4 lg:grid-cols-2">
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm">Model</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <Select
-                  value={selectedModel ?? ""}
-                  onValueChange={(v) => updateSettings({ preferredModelId: v })}
-                  disabled={modelOptions.length === 0}
-                >
-                  <SelectTrigger className="w-full" aria-label="Separation model">
-                    <SelectValue placeholder="No models registered" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {modelOptions.map((m) => (
-                      <SelectItem key={m.id} value={m.id}>
-                        {m.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="flex items-start gap-2 text-xs text-muted-foreground">
-                  <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
-                  {selectedModel ? resolutionReason : "Select a model when one becomes available in the Model Manager."}
-                </p>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm">Result slots</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-2 gap-3">
-                  {["Vocals", "Instrumental"].map((slot) => (
-                    <div
-                      key={slot}
-                      className="flex flex-col items-center justify-center rounded-lg border border-dashed border-border px-3 py-8 text-center"
-                    >
-                      <FileAudio2 className="mb-1.5 h-5 w-5 text-muted-foreground/50" aria-hidden />
-                      <p className="text-xs font-medium text-muted-foreground">{slot}</p>
-                      <p className="mt-0.5 text-[11px] text-muted-foreground/60">Empty — no result</p>
-                    </div>
-                  ))}
-                </div>
-                <Button
-                  className="mt-3 w-full gap-1.5"
-                  disabled={!track}
-                  onClick={() => {
-                    if (!track) return;
-                    enqueue(
-                      "export",
-                      `Separate ${track.name} → vocals/instrumental`,
-                      makeInferenceTask({
-                        track,
-                        requestedStems: ["Vocals", "Instrumental"],
-                        preferredModelId,
-                        device: "auto",
-                        outputFormat: exportFormat,
-                        mp3Bitrate,
-                      })
-                    );
-                  }}
-                >
-                  Start separation
-                </Button>
-                <p className="mt-2 text-center text-[11px] text-muted-foreground">
-                  Runs real AI inference when a model + runtime are installed. Without them, the job
-                  reports an honest “runtime unavailable” error — no stems are fabricated.
-                </p>
-              </CardContent>
-            </Card>
+      {!track ? (
+        <div className="space-y-3">
+          <EmptyState
+            icon={MicOff}
+            title="Choose audio to separate"
+            description="Import an audio track into the library, then select it here. Only successfully decoded tracks are available."
+          />
+          <div className="mx-auto max-w-xl">
+            <TrackSelect value={trackId} onChange={setTrackId} ariaLabel="Track to separate" />
           </div>
         </div>
       ) : (
         <>
-          <EmptyState
-            icon={MicOff}
-            title="Select a track to process"
-            description="Choose imported audio for separation. Processing remains unavailable until a model is installed."
-          />
-          <div className="mx-auto mt-4 max-w-xl">
-            <TrackSelect value={trackId} onChange={setTrackId} ariaLabel="Track to process" />
+          <div className="max-w-2xl space-y-1.5">
+            <label className="text-xs font-medium text-muted-foreground">Source track</label>
+            <TrackSelect value={trackId} onChange={setTrackId} ariaLabel="Track to separate" />
+            <p className="text-xs text-muted-foreground">
+              {formatTime(track.meta!.duration)} · {track.meta!.sampleRate ?? "?"} Hz · {track.meta!.channels ?? "?"} channels
+            </p>
           </div>
+
+          <div className="grid gap-4 lg:grid-cols-2">
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="flex items-center gap-2 text-sm"><ShieldCheck className="h-4 w-4" aria-hidden /> Local AI checkpoint</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  Select an existing MDX-Net model file. No downloads or automatic model installations occur during separation.
+                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full justify-center"
+                  disabled={!isNative() || Boolean(activeInference)}
+                  onClick={() => void chooseModel()}
+                >
+                  <FolderOpen className="h-4 w-4" aria-hidden />
+                  {localModelPath ? "Change model file" : "Choose local model file"}
+                </Button>
+                {localModelPath ? (
+                  <div className="min-w-0 rounded-md border border-border bg-muted/30 px-3 py-2">
+                    <p className="text-xs font-medium">{MODEL_NAME}</p>
+                    <p className="mt-1 break-all text-[11px] text-muted-foreground" title={localModelPath}>
+                      {localModelPath}
+                    </p>
+                    <p className="mt-1 text-[11px] text-muted-foreground">Integrity verification runs before inference; selection is not approval.</p>
+                  </div>
+                ) : <p className="text-xs text-muted-foreground">No checkpoint selected.</p>}
+                {localModelError ? <p role="alert" className="text-xs text-destructive">{localModelError}</p> : null}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm">Output stems</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  {(["Vocals", "Instrumental"] as const).map((stem) => {
+                    const result = completedStems?.result?.stemFiles?.find((s) => s.stem === stem);
+                    return (
+                      <div key={stem} className="flex min-w-0 flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border px-3 py-5 text-center">
+                        <FileAudio2 className="h-5 w-5 text-muted-foreground" aria-hidden />
+                        <p className="text-xs font-medium">{stem}</p>
+                        {result && completedStems ? (
+                          <>
+                            <p title={result.path} className="w-full truncate text-[11px] text-muted-foreground">
+                              {result.path.split(/[\\/]/).pop()}
+                            </p>
+                            <Button type="button" variant="outline" size="sm" className="w-full"
+                              onClick={async () => {
+                                setRevealError(null);
+                                try {
+                                  await native()?.revealInferenceStem({ jobId: completedStems.id, stem });
+                                } catch (error) {
+                                  setRevealError(error instanceof Error ? error.message : "Could not open the stem folder.");
+                                }
+                              }}>
+                              Show in folder
+                            </Button>
+                          </>
+                        ) : <p className="text-[11px] text-muted-foreground">No completed stem</p>}
+                      </div>
+                    );
+                  })}
+                </div>
+                {completedStems?.result?.modelUsed ? (
+                  <p className="text-xs text-muted-foreground">
+                    Verified job: {completedStems.result.modelUsed} · {completedStems.result.deviceUsed}
+                  </p>
+                ) : null}
+                {revealError ? <p role="alert" className="text-xs text-destructive">{revealError}</p> : null}
+                <Button type="button" className="w-full" onClick={startSeparation}
+                  disabled={!workerDetected || !localModelPath || Boolean(activeInference) || checkingRuntime}>
+                  {activeInference ? <LoaderCircle className="h-4 w-4 animate-spin" aria-hidden /> : <FileAudio2 className="h-4 w-4" aria-hidden />}
+                  {activeInference ? "An AI job is already processing" : "Start separation"}
+                </Button>
+                <p className="text-center text-[11px] leading-relaxed text-muted-foreground">
+                  Select the output folder when prompted. Each successful stem is written directly to that folder; no installer is required.
+                </p>
+              </CardContent>
+            </Card>
+          </div>
+
+          {activeInference && activeInference.id !== lastJobId ? (
+            <p role="status" className="rounded-lg border border-border bg-card p-3 text-sm text-muted-foreground">
+              Another separation is active. Wait for completion or cancel it in Processing Queue.
+            </p>
+          ) : null}
+          {currentJob ? (
+            <section aria-label="Current separation job" className="space-y-2">
+              <h2 className="text-sm font-semibold">Processing status</h2>
+              <InlineJob jobId={currentJob.id} />
+            </section>
+          ) : null}
         </>
       )}
     </div>

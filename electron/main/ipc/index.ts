@@ -4,8 +4,10 @@
  * payload shape; `shell: false` is enforced everywhere a process is spawned.
  */
 
-import { app, BrowserWindow, dialog, ipcMain, type IpcMainInvokeEvent, type WebContents } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, shell, type IpcMainInvokeEvent, type WebContents } from "electron";
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
+import * as path from "node:path";
 import * as os from "node:os";
 import * as fs from "node:fs";
 import {
@@ -16,6 +18,7 @@ import {
   ffprobeRequestSchema,
   ffmpegOpSchema,
   cancelRequestSchema,
+  revealInferenceStemSchema,
   resolvePathRequestSchema,
   nativeSettingsSchema,
   type FfmpegProgress,
@@ -46,6 +49,42 @@ function assertSender(event: IpcMainInvokeEvent): WebContents {
   return event.sender;
 }
 
+/** The only checkpoint allowed in the initial local-model preview. */
+const VERIFIED_MDX_NAME = "UVR-MDX-NET-Inst_HQ_5.onnx";
+const VERIFIED_MDX_SHA256 = "811cb24095d865763752310848b7ec86aeede0626cb05749ab35350e46897000";
+const VERIFIED_MDX_SIZE = 59074342;
+
+async function verifyLocalMdxModel(modelId: string, modelPath: string, architecture: string): Promise<void> {
+  if (architecture !== "mdx-net" || modelId !== VERIFIED_MDX_NAME) {
+    throw studioError("ARCHITECTURE_UNSUPPORTED", "Only the verified MDX-Net HQ 5 model is available for local testing.");
+  }
+  if (!path.isAbsolute(modelPath) || path.basename(modelPath) !== VERIFIED_MDX_NAME) {
+    throw studioError("MISSING_FILE", "Select the exact local ONNX checkpoint rather than a model identifier.");
+  }
+  let size: number;
+  try {
+    const stat = await fs.promises.stat(modelPath);
+    if (!stat.isFile()) throw new Error("Not a regular file");
+    size = stat.size;
+  } catch {
+    throw studioError("MISSING_FILE", "The chosen model checkpoint is missing or unreadable.");
+  }
+  if (size !== VERIFIED_MDX_SIZE) {
+    throw studioError("MODEL_CORRUPTED", "The selected model does not match the approved checkpoint size.");
+  }
+  const hash = createHash("sha256");
+  try {
+    for await (const block of fs.createReadStream(modelPath)) hash.update(block);
+  } catch {
+    throw studioError("MISSING_FILE", "Cannot read the selected model file.");
+  }
+  if (hash.digest("hex") !== VERIFIED_MDX_SHA256) {
+    throw studioError("MODEL_CORRUPTED", "The selected checkpoint failed the SHA-256 integrity check.");
+  }
+}
+
+// Only completed, validated inference results may be revealed via IPC.
+const completedInferenceStems = new Map<string, Map<string, string>>();
 export function registerIpcHandlers(_getMainWindow: () => BrowserWindow | null): void {
   /* --------------------------------- dialogs -------------------------------- */
   ipcMain.handle(IPC.DIALOG_OPEN_FILES, async (event, raw) => {
@@ -145,6 +184,7 @@ export function registerIpcHandlers(_getMainWindow: () => BrowserWindow | null):
     const sender = assertSender(event);
     const req = inferenceSeparateRequestSchema.parse(raw);
     try {
+      await verifyLocalMdxModel(req.modelId, req.modelPath, req.architecture);
       const result = await runSeparation({
         jobId: req.jobId,
         modelId: req.modelId,
@@ -165,6 +205,24 @@ export function registerIpcHandlers(_getMainWindow: () => BrowserWindow | null):
       });
       // The worker returns a `result` response; map it to the IPC result shape.
       if (result.type === "result") {
+        const root = await fs.promises.realpath(req.outputDir);
+        const approved = new Map<string, string>();
+        for (const item of result.stems) {
+          const resolved = await fs.promises.realpath(item.path);
+          const relative = path.relative(root, resolved);
+          const inside = Boolean(relative) && relative !== ".." &&
+            !relative.startsWith(".." + path.sep) && !path.isAbsolute(relative);
+          if (!inside || ![".wav", ".flac", ".mp3"].includes(path.extname(resolved).toLowerCase()) ||
+              !(await fs.promises.stat(resolved)).isFile()) {
+            throw studioError("INFERENCE_FAILED", "Inference returned an output outside the approved folder or with an invalid format.");
+          }
+          approved.set(item.stem, resolved);
+        }
+        completedInferenceStems.set(req.jobId, approved);
+        if (completedInferenceStems.size > 50) {
+          const oldest = completedInferenceStems.keys().next().value;
+          if (oldest) completedInferenceStems.delete(oldest);
+        }
         const res: InferenceSeparateResult = {
           jobId: req.jobId,
           stems: result.stems,
@@ -184,6 +242,20 @@ export function registerIpcHandlers(_getMainWindow: () => BrowserWindow | null):
     assertSender(event);
     const req = cancelRequestSchema.parse(raw ?? {});
     return { cancelled: cancelSeparation(req.jobId) };
+  });
+
+  ipcMain.handle(IPC.INFERENCE_REVEAL_STEM, async (event, raw) => {
+    assertSender(event);
+    const req = revealInferenceStemSchema.parse(raw);
+    const approved = completedInferenceStems.get(req.jobId)?.get(req.stem);
+    if (!approved) throw studioError("PERMISSION_DENIED", "No completed stem exists for this job.");
+    const real = await fs.promises.realpath(approved);
+    const stat = await fs.promises.stat(real);
+    if (real !== approved || !stat.isFile()) {
+      throw studioError("PERMISSION_DENIED", "The verified output file is no longer available.");
+    }
+    shell.showItemInFolder(real);
+    return { revealed: true };
   });
 
   /* --------------------------------- system --------------------------------- */

@@ -154,6 +154,7 @@ export interface StudioNativeApi {
     device: "auto" | "cpu" | "cuda" | "directml";
   }): Promise<InferenceSeparateResult>;
   cancelInference(req: { jobId: string }): Promise<{ cancelled: boolean }>;
+  revealInferenceStem(req: { jobId: string; stem: InferenceStemResult["stem"] }): Promise<{ revealed: boolean }>;
   onInferenceProgress(cb: (p: InferenceProgress) => void): () => void;
   getSettings(): Promise<NativeSettings>;
   setSettings(patch: Partial<NativeSettings>): Promise<NativeSettings>;

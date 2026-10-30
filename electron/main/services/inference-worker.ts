@@ -33,6 +33,7 @@ import {
   type WorkerResponse,
 } from "../../shared/inference-protocol";
 import { studioError } from "./errors";
+import { getFfprobePath } from "./paths";
 
 let cachedWorker: ResolvedWorker | null | undefined;
 let cachedRuntimes: string[] | null = null;
@@ -142,7 +143,14 @@ async function startWorker(): Promise<void> {
       "No inference worker is present. Package the PyInstaller onedir worker (inference-dist/windows-x64) on a Windows build host, or set LAS_INFERENCE_PYTHON for script-mode development."
     );
   }
-  workerProc = spawn(worker.command, worker.args, { shell: false, windowsHide: true });
+  const ffprobe = getFfprobePath();
+  const env = { ...process.env };
+  if (ffprobe) {
+    env.LAS_FFPROBE_PATH = ffprobe;
+    // Audio Separator also invokes FFmpeg as a subprocess; preserve its path.
+    env.PATH = [path.dirname(ffprobe), process.env.PATH ?? ""].join(path.delimiter);
+  }
+  workerProc = spawn(worker.command, worker.args, { shell: false, windowsHide: true, env });
   workerProc.stdout?.on("data", (chunk: Buffer) => {
     stdoutBuffer += chunk.toString();
     let nl = stdoutBuffer.indexOf("\n");
@@ -248,6 +256,9 @@ export async function runSeparation(params: SeparateParams): Promise<WorkerRespo
   const requestId = params.jobId;
   if (pending.has(requestId)) {
     throw studioError("INFERENCE_FAILED", "An inference job with this ID is already running.");
+  }
+  if (pending.size > 0) {
+    throw studioError("INFERENCE_FAILED", "Another inference job is still running. Queue the next job after it finishes.");
   }
   return new Promise<WorkerResponse>((resolve, reject) => {
     pending.set(requestId, { resolve, reject, onProgress: params.onProgress });

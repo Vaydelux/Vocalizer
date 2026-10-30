@@ -34,6 +34,7 @@ const api: StudioNativeApi = {
   inferenceStatus: () => ipcRenderer.invoke(IPC.INFERENCE_STATUS),
   runInference: (req) => ipcRenderer.invoke(IPC.INFERENCE_SEPARATE, req),
   cancelInference: (req) => ipcRenderer.invoke(IPC.INFERENCE_CANCEL, req),
+  revealInferenceStem: (req) => ipcRenderer.invoke(IPC.INFERENCE_REVEAL_STEM, req),
   onInferenceProgress: (cb) => {
     const handler = (_e: unknown, p: Parameters<typeof cb>[0]) => cb(p);
     ipcRenderer.on(IPC.INFERENCE_PROGRESS, handler);

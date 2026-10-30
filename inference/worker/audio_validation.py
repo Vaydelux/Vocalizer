@@ -5,13 +5,14 @@ successful separation from filename creation alone.
 
 from __future__ import annotations
 import json
+import os
 import subprocess
 from errors import WorkerError
 
 
 def probe(path: str) -> dict:
     argv = [
-        "ffprobe", "-v", "error", "-show_format", "-show_streams",
+        os.environ.get("LAS_FFPROBE_PATH", "ffprobe"), "-v", "error", "-show_format", "-show_streams",
         "-print_format", "json", path,
     ]
     proc = subprocess.run(argv, capture_output=True, text=True, timeout=30)

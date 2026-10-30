@@ -52,7 +52,7 @@ export type JobState =
   | "failed"
   | "cancelled";
 
-export type JobType = "export" | "analysis" | "convert";
+export type JobType = "export" | "analysis" | "convert" | "inference";
 
 export interface JobLogEntry {
   t: number;
@@ -65,6 +65,12 @@ export interface JobResultFile {
   /** Object URL of the finalized output (web preview). The desktop build writes to disk instead. */
   url: string;
   mime: string;
+  /** Native AI stems, shown after the worker returns verified paths. */
+  stemFiles?: { stem: ModelStem; path: string }[];
+  modelUsed?: string;
+  deviceUsed?: "cpu" | "cuda" | "directml";
+  /** Input identifier keeps AI output bound to the correct imported track. */
+  sourceTrackId?: string;
 }
 
 export interface Job {

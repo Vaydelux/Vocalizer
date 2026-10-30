@@ -1,9 +1,18 @@
-name: Windows Preview (unsigned, no model weights)
+name: Windows Debug EXE (no installer)
 
 on:
   workflow_dispatch:
+    inputs:
+      include_installer:
+        description: "Also build an optional dated NSIS setup file"
+        type: boolean
+        default: false
+      create_draft_release:
+        description: "Create/update a GitHub DRAFT prerelease (never auto-publish)"
+        type: boolean
+        default: false
   push:
-    branches: [release/initial-windows-readiness]
+    branches: [main, phase2/windows-inference-integration]
 
 permissions:
   contents: read
@@ -71,18 +80,117 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Prepare preview icon
         run: python scripts/create-preview-icon.py
-      - name: Build Windows NSIS installer
+      - name: Record stable UTC build date
+        shell: pwsh
+        run: |
+          $date = (Get-Date).ToUniversalTime().ToString("yyyy-MM-dd")
+          "BUILD_DATE=$date" >> $env:GITHUB_ENV
+      - name: Build unpacked Windows debug executable
+        shell: pwsh
+        run: |
+          bun run dist:win:debug
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $root = "release/win-unpacked"
+          $exe = Join-Path $root "Vocalizer.exe"
+          foreach ($required in @(
+            $exe,
+            (Join-Path $root "resources/app.asar"),
+            (Join-Path $root "resources/inference/inference-worker.exe"),
+            (Join-Path $root "resources/binaries/ffmpeg.exe"),
+            (Join-Path $root "resources/binaries/ffprobe.exe")
+          )) {
+            if (!(Test-Path -LiteralPath $required -PathType Leaf)) { throw "Missing debug runtime file: $required" }
+          }
+          @'
+          @echo off
+          cd /d "%~dp0"
+          start "" "%~dp0Vocalizer.exe" --vocalizer-debug
+          '@ | Set-Content -Encoding ASCII (Join-Path $root "Run-Vocalizer-Debug.cmd")
+          @'
+          VOCALIZER 0.3.0 - WINDOWS X64 UNPACKED DEBUG BUILD
+          Extract the entire ZIP. Keep the resources folder beside Vocalizer.exe.
+          Run "Run-Vocalizer-Debug.cmd" to open the app with developer tools,
+          or double-click Vocalizer.exe to run normally.
+          No installer is required. No default AI model weights are bundled.
+          This unsigned build has not completed Windows GUI/runtime acceptance.
+          '@ | Set-Content -Encoding UTF8 (Join-Path $root "README-DEBUG.txt")
+          $name = "Vocalizer-$env:BUILD_DATE-Windows-x64-Debug"
+          $zip = Join-Path "release" "$name.zip"
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          [System.IO.Compression.ZipFile]::CreateFromDirectory(
+            (Resolve-Path $root).Path,
+            (Join-Path (Get-Location) $zip),
+            [System.IO.Compression.CompressionLevel]::Fastest,
+            $false
+          )
+          $files = @($exe, $zip)
+          foreach ($item in $files) {
+            $hash = Get-FileHash -Algorithm SHA256 $item
+            Write-Host "$($hash.Hash)  $($hash.Path)"
+          }
+          Write-Host "Portable debug ZIP created at $zip"
+      - name: Upload dated portable debug ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: Vocalizer-${{ env.BUILD_DATE }}-Windows-x64-Debug
+          path: release/Vocalizer-${{ env.BUILD_DATE }}-Windows-x64-Debug.zip
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - name: Build optional dated Windows setup
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.include_installer }}
         shell: pwsh
         run: |
           bun run dist:win
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $artifacts = @(Get-ChildItem release -Filter "*setup.exe")
-          if ($artifacts.Count -eq 0) { throw "No NSIS installer was produced" }
-          Get-FileHash $artifacts[0].FullName -Algorithm SHA256
-      - name: Upload internal preview (NOT an offline AI release)
+          $original = "release/Vocalizer-0.3.0-x64-setup.exe"
+          if (!(Test-Path -LiteralPath $original -PathType Leaf)) { throw "Missing NSIS setup" }
+          $named = "release/Vocalizer-$env:BUILD_DATE-Windows-x64-Setup.exe"
+          Copy-Item -LiteralPath $original -Destination $named
+          Get-FileHash -Algorithm SHA256 $named | Format-List
+      - name: Upload optional dated setup
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.include_installer }}
         uses: actions/upload-artifact@v4
         with:
-          name: vocalizer-windows-unsigned-preview
-          path: release/*setup.exe
+          name: Vocalizer-${{ env.BUILD_DATE }}-Windows-x64-Setup
+          path: release/Vocalizer-${{ env.BUILD_DATE }}-Windows-x64-Setup.exe
           if-no-files-found: error
+          compression-level: 0
           retention-days: 14
+
+  draft_release:
+    # A draft release is a private staging artifact, NOT a public release.
+    if: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && inputs.create_draft_release) }}
+    needs: preview
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Use UTC date for deterministic release title and file names
+        run: echo "BUILD_DATE=$(date -u +%F)" >> "$GITHUB_ENV"
+      - name: Download dated debug ZIP
+        uses: actions/download-artifact@v4
+        with:
+          name: Vocalizer-${{ env.BUILD_DATE }}-Windows-x64-Debug
+          path: release-files
+      - name: Download optional setup
+        if: ${{ inputs.include_installer }}
+        uses: actions/download-artifact@v4
+        with:
+          name: Vocalizer-${{ env.BUILD_DATE }}-Windows-x64-Setup
+          path: release-files
+      - name: Create or update GitHub DRAFT prerelease
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="debug-$BUILD_DATE"
+          if ! gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$tag" --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" --title "Vocalizer $BUILD_DATE Windows Debug" \
+              --draft --prerelease \
+              --notes "Unsigned Windows debug preview. Portable folder ZIP; no installer needed. Not validated on a clean Windows PC. No bundled model weights. Do not publish until licensing and runtime tests are approved."
+          fi
+          gh release upload "$tag" release-files/* --repo "$GITHUB_REPOSITORY" --clobber
+

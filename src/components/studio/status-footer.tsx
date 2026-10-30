@@ -7,18 +7,27 @@
  */
 
 import { LoaderCircle } from "lucide-react";
+import { useSyncExternalStore } from "react";
+import { isNative } from "@/lib/studio/native";
 import { useJobs } from "@/lib/studio/store-jobs";
 import { APP_VERSION } from "@/lib/studio/app-info";
 
+const subscribeNative = () => () => {};
+const nativeSnapshot = () => isNative();
+const serverSnapshot = () => false;
+
 export function StatusFooter() {
+  // A stable server snapshot avoids hydration mismatch. The native preload
+  // is available on the first real browser render after hydration.
+  const desktopRuntime = useSyncExternalStore(subscribeNative, nativeSnapshot, serverSnapshot);
   const jobs = useJobs((s) => s.jobs);
   const active = jobs.filter((j) => ["queued", "preparing", "running", "cancelling"].includes(j.state));
   const current = active.find((j) => j.state === "running") ?? active[0];
 
   return (
     <footer className="flex h-8 shrink-0 items-center gap-3 border-t border-border bg-card/60 px-3 text-[11px] text-muted-foreground backdrop-blur">
-      <span className="shrink-0 font-medium">Local Audio Studio v{APP_VERSION}</span>
-      <span className="hidden shrink-0 sm:inline">· Web preview runtime</span>
+      <span className="shrink-0 font-medium">Vocalizer v{APP_VERSION}</span>
+      <span className="hidden shrink-0 sm:inline">{desktopRuntime ? "· Windows desktop runtime" : "· Web preview runtime"}</span>
       <span className="min-w-0 flex-1 truncate text-right sm:text-left">
         {current ? (
           <span className="inline-flex items-center gap-1.5">
