@@ -118,12 +118,23 @@ interface PendingRequest {
 
 let workerProc: ChildProcess | null = null;
 let ready = false;
+let startingWorker: Promise<void> | null = null;
 const pending = new Map<string, PendingRequest>();
 let stdoutBuffer = "";
 
-/** Spawn the worker (once) and wait for its `ready` message. */
-async function ensureWorker(): Promise<void> {
-  if (workerProc && ready) return;
+/** Serialize worker startup so simultaneous jobs never spawn duplicate parents. */
+function ensureWorker(): Promise<void> {
+  if (workerProc && ready) return Promise.resolve();
+  if (!startingWorker) {
+    startingWorker = startWorker().finally(() => {
+      startingWorker = null;
+    });
+  }
+  return startingWorker;
+}
+
+/** Spawn the worker and await the real protocol v1 ready handshake. */
+async function startWorker(): Promise<void> {
   const worker = resolveWorker();
   if (!worker) {
     throw studioError(
@@ -159,21 +170,29 @@ async function ensureWorker(): Promise<void> {
     // A clean shutdown during a pending job is still a failed job.
     failAll(studioError("INFERENCE_FAILED", `Worker exited before all requests completed (code ${code}).`));
   });
-  // Send init and wait for ready.
+  // Wait for a ready handshake with a bounded, cleaned-up poll.
+  // Previously the 100 ms timer loop continued indefinitely after timeout.
+  const startingProcess = workerProc;
   send({ type: "init", protocolVersion: 1 });
   await new Promise<void>((resolve, reject) => {
     const timeout = setTimeout(() => {
+      clearInterval(poll);
+      if (workerProc === startingProcess) {
+        startingProcess?.kill();
+      }
       reject(studioError("RUNTIME_UNAVAILABLE", "Worker did not become ready in time."));
     }, 30000);
-    const check = () => {
-      if (ready) {
+    const poll = setInterval(() => {
+      if (workerProc !== startingProcess) {
         clearTimeout(timeout);
+        clearInterval(poll);
+        reject(studioError("RUNTIME_UNAVAILABLE", "Inference worker exited before initialization."));
+      } else if (ready) {
+        clearTimeout(timeout);
+        clearInterval(poll);
         resolve();
-      } else {
-        setTimeout(check, 100);
       }
-    };
-    check();
+    }, 100);
   });
 }
 

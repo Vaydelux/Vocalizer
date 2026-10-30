@@ -8,6 +8,11 @@ on:
 permissions:
   contents: read
 
+# A new release-branch revision supersedes older unsigned preview builds.
+concurrency:
+  group: windows-preview-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   preview:
     runs-on: windows-latest
