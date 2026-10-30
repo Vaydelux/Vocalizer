@@ -114,9 +114,14 @@ jobs:
           No installer is required. No default AI model weights are bundled.
           This unsigned build has not completed Windows GUI/runtime acceptance.
           '@ | Set-Content -Encoding UTF8 (Join-Path $root "README-DEBUG.txt")
-          # Test the actual unpacked Electron app before archiving it.
-          # The app exits 0 only if renderer, secure preload, FFmpeg and worker
-          # all respond. This is NOT a full manual GUI/audio acceptance test.
+          # Generate synthetic, original audio to verify a real native
+          # Electron IPC -> FFmpeg trim -> FFprobe workflow.
+          $env:VOCALIZER_SMOKE_AUDIO = Join-Path $env:RUNNER_TEMP "vocalizer-smoke-input.wav"
+          $env:VOCALIZER_SMOKE_EXPORT = Join-Path $env:RUNNER_TEMP "vocalizer-smoke-output.wav"
+          & (Join-Path $root "resources/binaries/ffmpeg.exe") -hide_banner -loglevel error -nostdin -n -f lavfi -i "sine=frequency=440:duration=2" -c:a pcm_s16le $env:VOCALIZER_SMOKE_AUDIO
+          if ($LASTEXITCODE -ne 0) { throw "Could not generate synthetic smoke audio" }
+          # Test actual packaged Electron UI, preload, native FFmpeg/FFprobe,
+          # worker detection, and media export. Not a real AI model test.
           $stdout = Join-Path $env:RUNNER_TEMP "vocalizer-smoke.stdout.log"
           $stderr = Join-Path $env:RUNNER_TEMP "vocalizer-smoke.stderr.log"
           $process = Start-Process -FilePath (Resolve-Path $exe).Path `
