@@ -21,6 +21,7 @@ import { registerIpcHandlers, resolveCompletedStemForPlayback } from "./ipc";
 
 export const isPackaged = app.isPackaged;
 const debugEnabled = process.argv.includes("--vocalizer-debug");
+const smokeMode = process.argv.includes("--vocalizer-smoke-test");
 
 /** Opt-in diagnostics without weakening the secure renderer configuration. */
 function debugLog(message: string): void {
@@ -90,16 +91,63 @@ function createWindow(): void {
   });
 
   mainWindow.on("ready-to-show", () => {
-    mainWindow?.show();
+    if (!smokeMode) mainWindow?.show();
     debugLog("Main window ready-to-show");
-    if (debugEnabled) mainWindow?.webContents.openDevTools({ mode: "detach" });
+    if (debugEnabled && !smokeMode) mainWindow?.webContents.openDevTools({ mode: "detach" });
   });
   mainWindow.webContents.on("did-fail-load", (_event, code, description, url) => {
     debugLog(`Renderer load failure: code=${code} url=${url} detail=${description}`);
+    if (smokeMode && code !== -3) {
+      console.error(`SMOKE_FAIL renderer load: ${description} (${code})`);
+      app.exit(2);
+    }
   });
   mainWindow.webContents.on("render-process-gone", (_event, details) => {
     debugLog(`Renderer process gone: reason=${details.reason} exit=${details.exitCode}`);
   });
+
+  if (smokeMode) {
+    // One-shot packaged-app acceptance probe, without user data or model weights.
+    // CI must observe an actual Electron render + preload + native IPC result;
+    // merely finding Vocalizer.exe is insufficient evidence of a working GUI.
+    const failSafe = setTimeout(() => {
+      console.error("SMOKE_FAIL: packaged application did not initialize in 60 seconds");
+      app.exit(3);
+    }, 60_000);
+    mainWindow.webContents.once("did-finish-load", () => {
+      setTimeout(async () => {
+        try {
+          const result: {
+            hasBridge: boolean; hasRenderer: boolean;
+            hasFfmpeg: boolean; hasWorker: boolean;
+          } = await mainWindow!.webContents.executeJavaScript(`(async () => {
+            const bridge = window.studio;
+            if (!bridge || bridge.isNative !== true) {
+              return { hasBridge: false, hasRenderer: false, hasFfmpeg: false, hasWorker: false };
+            }
+            const system = await bridge.systemInfo();
+            const inference = await bridge.inferenceStatus();
+            return {
+              hasBridge: true,
+              hasRenderer: !!document.querySelector("main") && (document.body?.innerText?.length ?? 0) > 100,
+              hasFfmpeg: system.ffmpegAvailable === true,
+              hasWorker: inference.workerAvailable === true
+            };
+          })()`, true);
+          if (!result.hasBridge || !result.hasRenderer || !result.hasFfmpeg || !result.hasWorker) {
+            throw new Error("Packaged renderer, preload, FFmpeg or worker unavailable: " + JSON.stringify(result));
+          }
+          console.log("SMOKE_PASS " + JSON.stringify(result));
+          clearTimeout(failSafe);
+          app.exit(0);
+        } catch (error) {
+          console.error("SMOKE_FAIL " + String(error));
+          clearTimeout(failSafe);
+          app.exit(4);
+        }
+      }, 1800);
+    });
+  }
 
   if (isPackaged) {
     // Load the renderer through the privileged `las://` protocol so Next.js's
