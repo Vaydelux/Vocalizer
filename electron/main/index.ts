@@ -117,24 +117,41 @@ function createWindow(): void {
     mainWindow.webContents.once("did-finish-load", () => {
       setTimeout(async () => {
         try {
+          const fixture = process.env.VOCALIZER_SMOKE_AUDIO;
+          const exportPath = process.env.VOCALIZER_SMOKE_EXPORT;
+          if (!fixture || !exportPath) {
+            throw new Error("Windows smoke fixture paths are not configured.");
+          }
           const result: {
             hasBridge: boolean; hasRenderer: boolean;
-            hasFfmpeg: boolean; hasWorker: boolean;
+            hasFfmpeg: boolean; hasWorker: boolean; nativeAudioVerified: boolean;
           } = await mainWindow!.webContents.executeJavaScript(`(async () => {
             const bridge = window.studio;
             if (!bridge || bridge.isNative !== true) {
-              return { hasBridge: false, hasRenderer: false, hasFfmpeg: false, hasWorker: false };
+              return { hasBridge: false, hasRenderer: false, hasFfmpeg: false, hasWorker: false, nativeAudioVerified: false };
             }
             const system = await bridge.systemInfo();
             const inference = await bridge.inferenceStatus();
+            const fixture = ${JSON.stringify(fixture)};
+            const outputPath = ${JSON.stringify(exportPath)};
+            const source = await bridge.probeMetadata({ path: fixture });
+            const result = await bridge.runFfmpeg({
+              kind: "trim", jobId: "windows-smoke-trim",
+              inputPath: fixture, outputPath, outputFormat: "wav",
+              startSec: 0, endSec: 0.7
+            });
+            const output = await bridge.probeMetadata({ path: result.outputPath });
             return {
               hasBridge: true,
               hasRenderer: !!document.querySelector("main") && (document.body?.innerText?.length ?? 0) > 100,
               hasFfmpeg: system.ffmpegAvailable === true,
-              hasWorker: inference.workerAvailable === true
+              hasWorker: inference.workerAvailable === true,
+              nativeAudioVerified: source.duration > 1 &&
+                result.verified === true && result.sizeBytes > 0 &&
+                output.duration > 0.5 && output.duration < 1
             };
           })()`, true);
-          if (!result.hasBridge || !result.hasRenderer || !result.hasFfmpeg || !result.hasWorker) {
+          if (!result.hasBridge || !result.hasRenderer || !result.hasFfmpeg || !result.hasWorker || !result.nativeAudioVerified) {
             throw new Error("Packaged renderer, preload, FFmpeg or worker unavailable: " + JSON.stringify(result));
           }
           console.log("SMOKE_PASS " + JSON.stringify(result));
