@@ -114,8 +114,6 @@ export function isWorkerAvailable(): boolean {
 interface PendingRequest {
   resolve: (r: WorkerResponse) => void;
   reject: (err: unknown) => void;
-  profile?: "low-memory" | "balanced" | "thorough";
-  profile?: "low-memory" | "balanced" | "thorough";
   onProgress?: (p: { progress: number | null; stage: string }) => void;
 }
 
@@ -290,6 +288,7 @@ export interface SeparateParams {
   requestedStems: string[];
   outputFormat: "wav" | "wav24" | "mp3" | "flac";
   device: "auto" | "cpu" | "cuda" | "directml";
+  profile?: "low-memory" | "balanced" | "thorough";
   onProgress?: (p: { progress: number | null; stage: string }) => void;
 }
 
