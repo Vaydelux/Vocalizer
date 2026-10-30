@@ -48,7 +48,7 @@ function createWindow(): void {
     show: false,
     autoHideMenuBar: true,
     backgroundColor: "#0a0a0b",
-    title: "Local Audio Studio",
+    title: "Vocalizer",
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,

@@ -11,7 +11,7 @@
 # Node/Python/FFmpeg is required on the user's machine.
 
 appId: io.vaydelux.vocalizer
-productName: Local Audio Studio
+productName: Vocalizer
 copyright: Copyright (c) Local Audio Studio
 directories:
   output: release

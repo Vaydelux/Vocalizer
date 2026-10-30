@@ -16,6 +16,8 @@
 
 ## Current blockers
 
+- The desktop build is a Next.js static export. Remove server-only API endpoints rather than shipping routes that depend on a Node.js server.
+
 - The trained `UVR-MDX-NET-Inst_HQ_5.onnx` model is **not** bundled. Public availability does not establish redistribution rights.
 - Windows packaging and installed-app playback/inference have not been run in this conversation.
 - The existing worker uses `audio-separator`'s model catalog and may fetch weights unless explicitly pre-staged; do not claim the preview is offline-AI-ready.

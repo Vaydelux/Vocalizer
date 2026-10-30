@@ -2,7 +2,7 @@
 
 Vocalizer is a Windows-first local audio studio built with Next.js/React and Electron, with FFmpeg-powered editing and a Python AI separation worker.
 
-**Release status:** The application is under development. A standalone MDX-Net CPU inference path has been reported working on Linux, but the Windows installer and bundled offline model are not yet verified. The current model's redistribution permission remains unresolved.
+**Release status:** The application is under development. CI builds use static export (no server-only API routes). A standalone MDX-Net CPU inference path has been reported working on Linux, but the Windows installer and bundled offline model are not yet verified. The current model's redistribution permission remains unresolved.
 
 ## Get started
 
