@@ -42,10 +42,26 @@ import {
   type InferenceSeparateResult,
 } from "../../shared/ipc";
 
-/** True only for the renderer's own webContents — defends against cross-window IPC. */
+/** Authorize only the main application's top-level renderer.
+ * Other Electron windows, unexpected subframes and external origins cannot
+ * access filesystem dialogs, media execution or worker process controls. */
+let getPrimaryWindow: (() => BrowserWindow | null) | null = null;
 function assertSender(event: IpcMainInvokeEvent): WebContents {
-  const win = BrowserWindow.fromWebContents(event.sender);
-  if (!win) throw studioError("PERMISSION_DENIED", "IPC sender is not a recognized window.");
+  const expected = getPrimaryWindow?.();
+  if (!expected || expected.isDestroyed() || event.sender !== expected.webContents ||
+      event.senderFrame !== expected.webContents.mainFrame) {
+    throw studioError("PERMISSION_DENIED", "IPC sender is not Vocalizer's main application frame.");
+  }
+  let allowed = false;
+  try {
+    const frame = new URL(event.senderFrame.url);
+    allowed = expected.webContents.getURL().startsWith("las://")
+      ? frame.protocol === "las:" && frame.hostname === "renderer"
+      : frame.protocol === "http:" && frame.hostname === "localhost" && frame.port === "3000";
+  } catch {
+    // Reject malformed and untrusted origins.
+  }
+  if (!allowed) throw studioError("PERMISSION_DENIED", "IPC operation rejected for an untrusted application origin.");
   return event.sender;
 }
 
@@ -104,7 +120,8 @@ export async function resolveCompletedStemForPlayback(jobId: string, stem: strin
     return null;
   }
 }
-export function registerIpcHandlers(_getMainWindow: () => BrowserWindow | null): void {
+export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): void {
+  getPrimaryWindow = getMainWindow;
   /* --------------------------------- dialogs -------------------------------- */
   ipcMain.handle(IPC.DIALOG_OPEN_FILES, async (event, raw) => {
     assertSender(event);
