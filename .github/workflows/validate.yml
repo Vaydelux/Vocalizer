@@ -9,6 +9,11 @@ on:
 permissions:
   contents: read
 
+# Cancel superseded source builds when a PR receives a newer commit.
+concurrency:
+  group: validate-source-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   checks:
     runs-on: ubuntu-latest
