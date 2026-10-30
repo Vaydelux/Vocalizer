@@ -27,6 +27,8 @@ export interface SeparationRequest {
   device: "auto" | "cpu" | "cuda" | "directml";
   outputFormat: ExportFormat;
   mp3Bitrate?: Mp3Bitrate;
+  /** Explicit local MDX checkpoint selected by the user. Never fetched automatically. */
+  localModelPath?: string;
 }
 
 export function makeInferenceTask(req: SeparationRequest): JobTask {
@@ -40,24 +42,35 @@ export function makeInferenceTask(req: SeparationRequest): JobTask {
     }
     const api = native()!;
 
-    // 2. Resolve the model via the fallback resolver (stem-mismatch rejection).
-    const models = useModels.getState();
-    const resolution = await resolveModelForOperation(
-      { builtin: models.builtin, userModels: models.userModels },
-      {
-        operation: req.requestedStems.length > 2 ? "stem-separation" : "vocal-removal",
-        requiredStems: req.requestedStems,
-        preferredModelId: req.preferredModelId,
-        device: req.device === "auto" ? null : (req.device as "cpu" | "cuda" | "directml" | null),
-      }
-    );
-    if (resolution.status !== "ready") {
-      // Honest failure: the resolver returns the specific reason. This is the
-      // critical stem-mismatch rejection (4-stem request vs 2-stem default →
-      // NOT silently substituted).
-      const reason = "reason" in resolution ? resolution.reason : "No compatible model.";
-      throw studioError("MODEL_UNAVAILABLE", `Separation unavailable: ${reason}`);
+    // This early preview permits one verified local MDX-Net model selected
+    // through Electron's native dialog. Do not assume a registered manifest
+    // means weights are installed, or that the built-in slot actually exists.
+    if (!req.localModelPath) {
+      const models = useModels.getState();
+      const resolution = await resolveModelForOperation(
+        { builtin: models.builtin, userModels: models.userModels },
+        {
+          operation: req.requestedStems.length > 2 ? "stem-separation" : "vocal-removal",
+          requiredStems: req.requestedStems,
+          preferredModelId: req.preferredModelId,
+          device: req.device === "auto" ? null : req.device,
+        }
+      );
+      const reason = "reason" in resolution ? resolution.reason : "No usable model path was selected.";
+      throw studioError("MODEL_UNAVAILABLE", `Select a verified local MDX model file. ${reason}`);
     }
+    if (req.requestedStems.length !== 2 ||
+        !req.requestedStems.includes("Vocals") ||
+        !req.requestedStems.includes("Instrumental")) {
+      throw studioError("MODEL_UNAVAILABLE", "The local MDX-Net preview supports Vocals + Instrumental only.");
+    }
+    const status = await api.inferenceStatus();
+    if (!status.workerAvailable) {
+      throw studioError("CAPABILITY_UNAVAILABLE", "The native Python inference worker is not bundled or installed.");
+    }
+    const modelId = "UVR-MDX-NET-Inst_HQ_5.onnx";
+    // The main-process IPC handler re-hashes and validates the selected file.
+    const modelPath = req.localModelPath;
 
     // 3. Resolve real filesystem paths.
     const inputPath = api.getPathForFile(req.track.file);
@@ -65,23 +78,30 @@ export function makeInferenceTask(req: SeparationRequest): JobTask {
     if (!outputDir) throw studioError("CANCELLED", "No output directory selected.");
 
     const fmt = req.outputFormat === "wav16" ? "wav" : req.outputFormat === "wav24" ? "wav24" : req.outputFormat;
-    ctx.log(`Inference: ${resolution.modelId} on ${resolution.device} → ${outputDir}`);
+    ctx.log(`Inference: ${modelId} on CPU → ${outputDir}`);
 
     // 4. Subscribe to progress, then run.
     const unsub = api.onInferenceProgress((p) => {
       if (p.jobId === ctx.jobId) ctx.reportProgress(p.progress, p.stage);
     });
+    const onAbort = () => {
+      void api.cancelInference({ jobId: ctx.jobId }).catch(() => {
+        // A crashed worker will reject the main inference request.
+      });
+    };
+    if (ctx.signal.aborted) throw studioError("CANCELLED", "Inference cancelled before starting.");
+    ctx.signal.addEventListener("abort", onAbort, { once: true });
     try {
       const result = await api.runInference({
         jobId: ctx.jobId,
-        modelId: resolution.modelId,
-        modelPath: resolution.modelId, // the worker resolves the model path from the registry/manifest
-        architecture: "mdx-net", // resolved from the model manifest in a real build
+        modelId,
+        modelPath,
+        architecture: "mdx-net",
         inputPath,
         outputDir,
         requestedStems: req.requestedStems,
         outputFormat: fmt,
-        device: req.device,
+        device: "cpu",
       });
       ctx.log(
         `Separation complete: ${result.stems.length} stem(s), model=${result.modelUsed}, device=${result.deviceUsed}, fallback=${result.fallbackUsed}.`
@@ -107,6 +127,7 @@ export function makeInferenceTask(req: SeparationRequest): JobTask {
     } catch (err) {
       throw toStudioError(err);
     } finally {
+      ctx.signal.removeEventListener("abort", onAbort);
       unsub();
     }
   };
