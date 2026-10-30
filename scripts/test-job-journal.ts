@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { readJobReceipts, recordJobReceipt, previousJobReceipts, clearJobReceipts } from "../src/lib/studio/job-journal.ts";
+import { readJobReceipts, recordJobReceipt, previousJobReceipts, clearJobReceipts } from "../src/lib/studio/job-journal";
 const map = new Map<string, string>();
 const storage = {
   getItem: (key: string) => map.get(key) ?? null,
