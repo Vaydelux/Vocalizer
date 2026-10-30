@@ -14,6 +14,7 @@ from audio_separator.separator import Separator as ASeparator
 
 from errors import WorkerError
 from audio_validation import verify_audio_file
+from local_model import require_local_mdx_model
 
 # Map a requested stem name to the audio-separator output-token convention.
 # MDX-Net Inst-HQ produces two files named "<input>_(Vocals)_..." and
@@ -49,13 +50,21 @@ class SeparatorService:
     ) -> tuple[list[dict[str, Any]], str, str, bool]:
         if not os.path.isfile(input_path):
             raise WorkerError("inference-failed", f"Input file not found: {input_path}")
+        if architecture != "mdx-net":
+            raise WorkerError("architecture-unsupported", "Only MDX-Net inference is supported in this preview.")
+        if device not in ("cpu", "auto"):
+            raise WorkerError("device-unsupported", "This inference worker is CPU-only.")
+        # The audio-separator library normally downloads missing checkpoints.
+        # Never start the library until we verify an actual local checkpoint.
+        verified_model = require_local_mdx_model(model_id, model_path)
         os.makedirs(output_dir, exist_ok=True)
 
         on_progress(None, "Preparing")
         # Reuse a Separator per output format (the underlying model is cached).
-        cache_key = f"{architecture}:{model_id}:{output_format}:{segment_size}"
+        cache_key = f"{architecture}:{verified_model}:{output_format}:{segment_size}"
         if cache_key not in self._separators:
             sep = ASeparator(
+                model_file_dir=str(verified_model.parent),
                 output_dir=output_dir,
                 output_format=output_format.upper() if output_format != "wav24" else "WAV",
                 log_level=40,  # WARNING — keep stdout clean
@@ -67,7 +76,7 @@ class SeparatorService:
                     "enable_denoise": False,
                 },
             )
-            sep.load_model(model_id)
+            sep.load_model(verified_model.name)
             self._separators[cache_key] = sep
         sep = self._separators[cache_key]
 
