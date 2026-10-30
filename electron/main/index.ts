@@ -20,6 +20,7 @@ import { pathToFileURL } from "node:url";
 import { registerIpcHandlers, resolveCompletedStemForPlayback } from "./ipc";
 import { cleanupOrphanedRecordings } from "./services/recording-staging";
 import { cleanupInferenceScratch } from "./services/inference-outputs";
+import { shutdownWorkerImmediately } from "./services/inference-worker";
 
 export const isPackaged = app.isPackaged;
 const debugEnabled = process.argv.includes("--vocalizer-debug");
@@ -114,6 +115,7 @@ function createWindow(): void {
     // merely finding Vocalizer.exe is insufficient evidence of a working GUI.
     const failSafe = setTimeout(() => {
       console.error("SMOKE_FAIL: packaged application did not initialize in 60 seconds");
+      shutdownWorkerImmediately();
       app.exit(3);
     }, 60_000);
     mainWindow.webContents.once("did-finish-load", () => {
@@ -183,10 +185,12 @@ function createWindow(): void {
           }
           console.log("SMOKE_PASS " + JSON.stringify(result));
           clearTimeout(failSafe);
+          shutdownWorkerImmediately();
           app.exit(0);
         } catch (error) {
           console.error("SMOKE_FAIL " + String(error));
           clearTimeout(failSafe);
+          shutdownWorkerImmediately();
           app.exit(4);
         }
       }, 1800);
@@ -295,10 +299,11 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 app.on("window-all-closed", () => {
-  // Shut the inference worker down before quitting (no zombie processes).
-  import("./services/inference-worker").then(({ shutdownWorker }) => shutdownWorker());
   if (process.platform !== "darwin") app.quit();
 });
+// The application must terminate the worker before its event loop exits;
+// asynchronous dynamic imports and delayed timeouts are not reliable here.
+app.on("before-quit", () => shutdownWorkerImmediately());
 
 // Harden navigation: only allow loads to the app's own origin (las://) or localhost dev.
 app.on("web-contents-created", (_event, contents) => {

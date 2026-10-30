@@ -23,7 +23,7 @@
  * (a Windows packaging host, or a dev box with LAS_INFERENCE_PYTHON set).
  */
 
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import {
@@ -352,6 +352,35 @@ export function shutdownWorker(): void {
     ready = false;
     failAll(studioError("RUNTIME_UNAVAILABLE", "Inference worker was shut down."));
   }, 2000);
+}
+
+/** Synchronous final-shutdown path used by Electron before-quit and smoke
+ * termination. A deferred timeout cannot run after app.quit()/app.exit().
+ * On Windows, /T is essential because the Python worker can spawn a child.
+ */
+export function shutdownWorkerImmediately(): void {
+  const child = workerProc;
+  if (!child) return;
+  workerProc = null;
+  ready = false;
+  stdoutBuffer = "";
+  try { child.stdin?.write(serializeWorkerRequest({ type: "shutdown" }) + "\n"); }
+  catch { /* transport may already have failed */ }
+  if (process.platform === "win32" && child.pid) {
+    try {
+      const killed = spawnSync("taskkill", ["/PID", String(child.pid), "/T", "/F"], {
+        shell: false, windowsHide: true, stdio: "ignore", timeout: 5000,
+      });
+      if (killed.error || killed.status !== 0) {
+        try { child.kill(); } catch { /* already exited */ }
+      }
+    } catch {
+      try { child.kill(); } catch { /* already exited */ }
+    }
+  } else {
+    try { child.kill(); } catch { /* already exited */ }
+  }
+  failAll(studioError("RUNTIME_UNAVAILABLE", "Inference worker stopped during application shutdown."));
 }
 
 /** Detected runtimes from the worker's ready message (empty until bundled). */

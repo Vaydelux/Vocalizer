@@ -10,59 +10,88 @@ import type { NativeAudioMeta } from "../../shared/ipc";
 import { studioError } from "./errors";
 
 /** Probe a file's audio metadata. Throws a typed error on failure. */
+const MAX_PROBE_OUTPUT = 2 * 1024 * 1024;
+const PROBE_TIMEOUT_MS = 30_000;
+
 export function probeFile(filePath: string, signal?: AbortSignal): Promise<NativeAudioMeta> {
   const ffprobe = getFfprobePath();
-  if (!ffprobe) {
-    throw studioError("CAPABILITY_UNAVAILABLE", "FFprobe binary is not bundled. Bundle it via electron-builder extraResources.");
-  }
-  let sizeBytes = 0;
-  try {
-    sizeBytes = fs.statSync(filePath).size;
-  } catch {
-    throw studioError("MISSING_FILE", `Cannot stat ${filePath}`);
-  }
+  if (!ffprobe) throw studioError("CAPABILITY_UNAVAILABLE", "FFprobe binary is not bundled.");
 
+  let sizeBytes: number;
+  try {
+    const stats = fs.statSync(filePath);
+    if (!stats.isFile()) throw new Error("Not a regular file.");
+    sizeBytes = stats.size;
+  } catch {
+    throw studioError("MISSING_FILE", "The audio file is missing or inaccessible.");
+  }
+  if (signal?.aborted) {
+    return Promise.reject(studioError("CANCELLED", "Audio metadata probe was cancelled."));
+  }
   return new Promise<NativeAudioMeta>((resolve, reject) => {
-    const argv = [
-      "-v", "error",
-      "-show_format",
-      "-show_streams",
-      "-print_format", "json",
-      filePath,
-    ];
-    const proc = spawn(ffprobe, argv, { shell: false, windowsHide: true });
-    let stdout = "";
-    let stderr = "";
-    proc.stdout.on("data", (d) => (stdout += d.toString()));
-    proc.stderr.on("data", (d) => (stderr += d.toString()));
-    proc.on("error", (err) => reject(studioError("UNKNOWN", `FFprobe spawn failed: ${err.message}`)));
-    proc.on("close", (code) => {
-      if (code !== 0) {
-        reject(studioError("DECODE_FAILED", `FFprobe exited ${code}: ${stderr.slice(0, 200)}`));
+    // User-supplied media is untrusted. Never allow a metadata process to hang
+    // indefinitely or consume unlimited main-process RAM.
+    const proc = spawn(ffprobe, [
+      "-v", "error", "-show_format", "-show_streams", "-print_format", "json", filePath,
+    ], { shell: false, windowsHide: true });
+    let output = "";
+    let settled = false;
+    const finish = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", abort);
+    };
+    const fail = (code: "CANCELLED" | "DECODE_FAILED", message: string) => {
+      if (settled) return;
+      settled = true;
+      try { proc.kill(); } catch { /* exited already */ }
+      finish();
+      reject(studioError(code, message));
+    };
+    const abort = () => fail("CANCELLED", "Audio metadata probe was cancelled.");
+    const timer = setTimeout(
+      () => fail("DECODE_FAILED", "Audio metadata probe timed out after 30 seconds."),
+      PROBE_TIMEOUT_MS
+    );
+    signal?.addEventListener("abort", abort, { once: true });
+    if (signal?.aborted) { abort(); return; }
+
+    proc.stdout?.on("data", (chunk: Buffer) => {
+      output += chunk.toString();
+      if (output.length > MAX_PROBE_OUTPUT) {
+        fail("DECODE_FAILED", "Audio metadata response exceeded the safe size limit.");
+      }
+    });
+    // Drain stderr so a corrupted file cannot block ffprobe's pipe.
+    // Raw diagnostics can contain local filenames: do not expose them to UI.
+    proc.stderr?.resume();
+    proc.on("error", () => fail("DECODE_FAILED", "Unable to start audio metadata probe."));
+    proc.on("close", (status) => {
+      if (settled) return;
+      if (status !== 0) {
+        fail("DECODE_FAILED", "FFprobe could not read this media file.");
         return;
       }
       try {
-        const json = JSON.parse(stdout);
-        const stream = (json.streams ?? []).find((s: { codec_type?: string }) => s.codec_type === "audio");
+        const json = JSON.parse(output);
+        const stream = (json.streams ?? []).find((entry: { codec_type?: string }) => entry.codec_type === "audio");
+        if (!stream) throw new Error("No audio stream.");
         const fmt = json.format ?? {};
-        const duration = parseFloat(stream?.duration ?? fmt.duration ?? "0");
-        resolve({
+        const duration = Number.parseFloat(stream.duration ?? fmt.duration ?? "0");
+        const meta: NativeAudioMeta = {
           duration: Number.isFinite(duration) ? duration : 0,
-          sampleRate: stream?.sample_rate ? parseInt(stream.sample_rate, 10) : null,
-          channels: stream?.channels ? parseInt(stream.channels, 10) : null,
-          codec: stream?.codec_name ?? null,
+          sampleRate: stream.sample_rate ? Number.parseInt(stream.sample_rate, 10) : null,
+          channels: stream.channels ? Number.parseInt(stream.channels, 10) : null,
+          codec: stream.codec_name ?? null,
           format: fmt.format_name ?? null,
-          bitrateKbps: fmt.bit_rate ? Math.round(parseInt(fmt.bit_rate, 10) / 1000) : null,
+          bitrateKbps: fmt.bit_rate ? Math.round(Number.parseInt(fmt.bit_rate, 10) / 1000) : null,
           sizeBytes,
-        });
-      } catch (err) {
-        reject(studioError("DECODE_FAILED", `FFprobe output parse failed: ${err instanceof Error ? err.message : String(err)}`));
+        };
+        settled = true;
+        finish();
+        resolve(meta);
+      } catch {
+        fail("DECODE_FAILED", "Audio metadata is invalid or incomplete.");
       }
     });
-    if (signal) {
-      signal.addEventListener("abort", () => {
-        try { proc.kill("SIGKILL"); } catch { /* already exited */ }
-      }, { once: true });
-    }
   });
 }
