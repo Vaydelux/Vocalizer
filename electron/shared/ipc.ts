@@ -25,6 +25,8 @@ export const IPC = {
   FFMPEG_CANCEL: "ffmpeg:cancel",
   FFMPEG_PROGRESS: "ffmpeg:progress",
   FFMPEG_REVEAL_OUTPUT: "ffmpeg:revealOutput",
+  RECORDING_STAGE: "recording:stage",
+  RECORDING_DISCARD: "recording:discard",
   SETTINGS_GET: "settings:get",
   SETTINGS_SET: "settings:set",
   SYSTEM_INFO: "system:info",
@@ -152,6 +154,13 @@ export interface FfmpegProgress {
   stage: string;
 }
 
+export const recordingStageSchema = z.object({
+  jobId: z.string().min(1).max(80),
+  format: z.enum(["webm", "ogg", "m4a"]),
+  bytes: z.instanceof(Uint8Array),
+});
+export type RecordingStageRequest = z.infer<typeof recordingStageSchema>;
+
 export const cancelRequestSchema = z.object({ jobId: z.string().min(1).max(80) });
 export type CancelRequest = z.infer<typeof cancelRequestSchema>;
 
@@ -261,6 +270,8 @@ export interface StudioNativeApi {
   runFfmpeg(op: FfmpegOp): Promise<FfmpegResult>;
   cancelFfmpeg(req: CancelRequest): Promise<{ cancelled: boolean }>;
   revealFfmpegOutput(req: { jobId: string }): Promise<{ revealed: boolean }>;
+  stageRecording(req: RecordingStageRequest): Promise<{ staged: boolean }>;
+  discardRecording(req: CancelRequest): Promise<{ discarded: boolean }>;
   onFfmpegProgress(cb: (p: FfmpegProgress) => void): () => void;
   // Inference (AI separation) — honestly unavailable until a worker is bundled.
   inferenceStatus(): Promise<InferenceStatus>;

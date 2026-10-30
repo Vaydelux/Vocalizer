@@ -18,6 +18,7 @@ import * as path from "node:path";
 import * as fs from "node:fs";
 import { pathToFileURL } from "node:url";
 import { registerIpcHandlers, resolveCompletedStemForPlayback } from "./ipc";
+import { cleanupOrphanedRecordings } from "./services/recording-staging";
 
 export const isPackaged = app.isPackaged;
 const debugEnabled = process.argv.includes("--vocalizer-debug");
@@ -187,7 +188,11 @@ if (!app.requestSingleInstanceLock()) {
     }
   });
 
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
+    // Remove files from interrupted microphone recordings before accepting
+    // any new IPC requests; never touch ordinary user audio.
+    try { await cleanupOrphanedRecordings(app.getPath("userData")); }
+    catch (error) { console.error("Cannot clean up stale recording data:", error); }
     debugLog(`Starting Vocalizer (packaged=${app.isPackaged}, resources=${process.resourcesPath})`);
     // Privileged custom protocol: serves bundled static assets under las://renderer/.
     // Next.js static export uses absolute /_next/... URLs; under file:// these

@@ -139,6 +139,8 @@ export interface StudioNativeApi {
   runFfmpeg(op: FfmpegOp): Promise<FfmpegResult>;
   cancelFfmpeg(req: CancelRequest): Promise<{ cancelled: boolean }>;
   revealFfmpegOutput(req: { jobId: string }): Promise<{ revealed: boolean }>;
+  stageRecording(req: { jobId: string; format: "webm" | "ogg" | "m4a"; bytes: Uint8Array }): Promise<{ staged: boolean }>;
+  discardRecording(req: CancelRequest): Promise<{ discarded: boolean }>;
   onFfmpegProgress(cb: (p: FfmpegProgress) => void): () => void;
   // Inference (AI separation) — honestly unavailable until a worker is bundled.
   inferenceStatus(): Promise<InferenceStatus>;

@@ -18,6 +18,7 @@ import {
   ffprobeRequestSchema,
   ffmpegOpSchema,
   cancelRequestSchema,
+  recordingStageSchema,
   revealInferenceStemSchema,
   resolvePathRequestSchema,
   nativeSettingsSchema,
@@ -27,6 +28,7 @@ import {
 import { probeFile } from "../services/ffprobe";
 import { runFfmpeg, cancelJob, toMainErrorPayload } from "../services/ffmpeg";
 import { getSettings, setSettings } from "../services/settings";
+import { stageRecordingBytes, discardRecordingFile } from "../services/recording-staging";
 import { getFfmpegPath, getFfprobePath, resolvePathKind } from "../services/paths";
 import { studioError } from "../services/errors";
 import {
@@ -102,6 +104,7 @@ async function verifyLocalMdxModel(modelId: string, modelPath: string, architect
 // Only completed, validated inference results may be revealed or played.
 const completedInferenceStems = new Map<string, Map<string, string>>();
 const completedFfmpegOutputs = new Map<string, string>();
+const stagedRecordings = new Map<string, string>();
 const ALLOWED_STEMS = new Set(["Vocals", "Instrumental"]);
 
 /** Playback is restricted to exact paths already verified by the main process.
@@ -169,10 +172,39 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
     return probeFile(req.path);
   });
 
+  /* ---------------------------- recorded audio ----------------------------- */
+  ipcMain.handle(IPC.RECORDING_STAGE, async (event, raw) => {
+    assertSender(event);
+    const req = recordingStageSchema.parse(raw);
+    if (stagedRecordings.has(req.jobId)) {
+      throw studioError("INPUT_INVALID", "A recording is already staged for this job.");
+    }
+    const tempPath = await stageRecordingBytes(app.getPath("userData"), req.jobId, req.format, req.bytes);
+    stagedRecordings.set(req.jobId, tempPath);
+    return { staged: true };
+  });
+
+  ipcMain.handle(IPC.RECORDING_DISCARD, async (event, raw) => {
+    assertSender(event);
+    const req = cancelRequestSchema.parse(raw);
+    const file = stagedRecordings.get(req.jobId);
+    if (!file) return { discarded: false };
+    stagedRecordings.delete(req.jobId);
+    await discardRecordingFile(file);
+    return { discarded: true };
+  });
+
   /* --------------------------------- ffmpeg --------------------------------- */
   ipcMain.handle(IPC.FFMPEG_RUN, async (event, raw) => {
     const sender = assertSender(event);
-    const op = ffmpegOpSchema.parse(raw);
+    const request = ffmpegOpSchema.parse(raw);
+    const stagedFile = request.kind === "mix" && request.vocalPath === "__recording__"
+      ? stagedRecordings.get(request.jobId)
+      : null;
+    if (request.kind === "mix" && request.vocalPath === "__recording__" && !stagedFile) {
+      throw studioError("MISSING_FILE", "The microphone recording is not staged for this job.");
+    }
+    const op = stagedFile && request.kind === "mix" ? { ...request, vocalPath: stagedFile } : request;
     const emit = (p: FfmpegProgress) => {
       if (!sender.isDestroyed()) sender.send(IPC.FFMPEG_PROGRESS, p);
     };
@@ -193,6 +225,13 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
       return result;
     } catch (err) {
       throw toMainErrorPayload(err);
+    } finally {
+      // The native operation has finished. Clear its private source even
+      // if the renderer failed before requesting cleanup.
+      if (stagedFile) {
+        stagedRecordings.delete(request.jobId);
+        await discardRecordingFile(stagedFile);
+      }
     }
   });
 
