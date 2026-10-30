@@ -21,7 +21,7 @@ export class ErrorBoundary extends React.Component<{ children: React.ReactNode }
 
   componentDidCatch(error: Error, info: React.ErrorInfo): void {
     // Local diagnostics only — no external reporting in this privacy-first build.
-    console.error("[LocalAudioStudio] Renderer error boundary:", error, info.componentStack);
+    console.error("[Vocalizer] Renderer error boundary:", error, info.componentStack);
   }
 
   render(): React.ReactNode {
@@ -34,8 +34,8 @@ export class ErrorBoundary extends React.Component<{ children: React.ReactNode }
               <h1 className="text-base font-semibold">Something went wrong</h1>
             </div>
             <p className="mb-1 text-sm text-muted-foreground">
-              The interface hit an unexpected error. Your audio files are untouched — nothing was
-              uploaded or lost.
+              The interface encountered an unexpected error. Files on disk are untouched,
+              but unsaved session work might need to be repeated.
             </p>
             <pre className="mb-4 max-h-32 overflow-y-auto rounded-md bg-muted/50 p-2 text-xs text-muted-foreground">
               {this.state.error.message}
@@ -43,6 +43,9 @@ export class ErrorBoundary extends React.Component<{ children: React.ReactNode }
             <Button size="sm" onClick={() => this.setState({ error: null })}>
               Try again
             </Button>
+            <p className="mt-3 text-xs text-muted-foreground">
+              If this happens again, open Vocalizer in debug mode and include the error message in your report.
+            </p>
           </div>
         </div>
       );

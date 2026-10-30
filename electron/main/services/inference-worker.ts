@@ -117,6 +117,21 @@ interface PendingRequest {
   onProgress?: (p: { progress: number | null; stage: string }) => void;
 }
 
+/** Kill the frozen worker and its inference child on Windows.
+ * Terminating only the parent can strand a PyInstaller --job subprocess. */
+function terminateWorkerTree(child: ChildProcess): void {
+  if (process.platform === "win32" && child.pid) {
+    const killer = spawn("taskkill", ["/PID", String(child.pid), "/T", "/F"], {
+      shell: false, windowsHide: true, stdio: "ignore",
+    });
+    killer.once("error", () => {
+      try { child.kill(); } catch { /* already exited */ }
+    });
+  } else {
+    try { child.kill(); } catch { /* already exited */ }
+  }
+}
+
 let workerProc: ChildProcess | null = null;
 let ready = false;
 let startingWorker: Promise<void> | null = null;
@@ -150,28 +165,54 @@ async function startWorker(): Promise<void> {
     // Audio Separator also invokes FFmpeg as a subprocess; preserve its path.
     env.PATH = [path.dirname(ffprobe), process.env.PATH ?? ""].join(path.delimiter);
   }
-  workerProc = spawn(worker.command, worker.args, { shell: false, windowsHide: true, env });
-  workerProc.stdout?.on("data", (chunk: Buffer) => {
+  const child = spawn(worker.command, worker.args, { shell: false, windowsHide: true, env });
+  workerProc = child;
+  stdoutBuffer = "";
+  const rejectInvalidProtocol = (description: string) => {
+    if (workerProc !== child) return;
+    ready = false;
+    failAll(studioError("INFERENCE_FAILED", description));
+    terminateWorkerTree(child);
+  };
+  child.stdout?.on("data", (chunk: Buffer) => {
+    if (workerProc !== child) return;
     stdoutBuffer += chunk.toString();
+    if (stdoutBuffer.length > 1_048_576) {
+      rejectInvalidProtocol("Inference worker exceeded the maximum protocol message size.");
+      return;
+    }
     let nl = stdoutBuffer.indexOf("\n");
     while (nl !== -1) {
       const line = stdoutBuffer.slice(0, nl).trim();
       stdoutBuffer = stdoutBuffer.slice(nl + 1);
       nl = stdoutBuffer.indexOf("\n");
-      if (!line) continue;
-      const msg = parseWorkerResponse(line);
-      if (!msg) continue;
-      routeResponse(msg);
+      if (line) {
+        const msg = parseWorkerResponse(line);
+        if (!msg) {
+          rejectInvalidProtocol("Inference worker emitted invalid protocol output.");
+          return;
+        }
+        routeResponse(msg);
+      }
     }
   });
-  workerProc.stderr?.on("data", () => {
-    // Worker diagnostics on stderr — not surfaced to the user verbatim.
+  child.stderr?.on("data", (chunk: Buffer) => {
+    // Diagnostics are opt-in; never send untrusted worker text to the renderer.
+    if (process.argv.includes("--vocalizer-debug")) {
+      console.error("[Vocalizer inference worker]", chunk.toString().slice(0, 4096));
+    }
   });
-  workerProc.on("error", (err) => {
+  child.stdin?.on("error", () => {
+    if (workerProc === child) rejectInvalidProtocol("Inference worker closed its command stream.");
+  });
+  child.on("error", (err) => {
+    if (workerProc !== child) return;
     ready = false;
+    workerProc = null;
     failAll(studioError("RUNTIME_UNAVAILABLE", `Worker spawn failed: ${err.message}`));
   });
-  workerProc.on("close", (code) => {
+  child.on("close", (code) => {
+    if (workerProc !== child) return;
     ready = false;
     workerProc = null;
     stdoutBuffer = "";
@@ -186,7 +227,7 @@ async function startWorker(): Promise<void> {
     const timeout = setTimeout(() => {
       clearInterval(poll);
       if (workerProc === startingProcess) {
-        startingProcess?.kill();
+        if (startingProcess) terminateWorkerTree(startingProcess);
       }
       reject(studioError("RUNTIME_UNAVAILABLE", "Worker did not become ready in time."));
     }, 30000);
@@ -296,20 +337,20 @@ export function cancelSeparation(requestId: string): boolean {
 
 /** Shut the worker down cleanly on app quit. */
 export function shutdownWorker(): void {
-  if (!workerProc) return;
+  const shuttingDown = workerProc;
+  if (!shuttingDown) return;
   try {
     send({ type: "shutdown" });
   } catch {
-    /* ignore */
+    // The transport is already broken; the guarded timeout still cleans up.
   }
   setTimeout(() => {
-    try {
-      workerProc?.kill("SIGKILL");
-    } catch {
-      /* already dead */
-    }
+    // Never kill a NEW worker that was started after this one exited.
+    if (workerProc !== shuttingDown) return;
+    terminateWorkerTree(shuttingDown);
     workerProc = null;
     ready = false;
+    failAll(studioError("RUNTIME_UNAVAILABLE", "Inference worker was shut down."));
   }, 2000);
 }
 

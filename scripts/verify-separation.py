@@ -8,7 +8,11 @@ Drives the inference worker's protocol end-to-end:
 
 Usage:
   python scripts/verify-separation.py --input song.wav --out ./sep-out \
-      [--model UVR-MDX-NET-Inst_HQ_5.onnx] [--format wav] [--stems Vocals,Instrumental]
+      --model-path /absolute/path/to/UVR-MDX-NET-Inst_HQ_5.onnx
+  # Frozen Windows worker:
+  python scripts/verify-separation.py --input song.wav --out ./sep-out \
+      --model-path C:/models/UVR-MDX-NET-Inst_HQ_5.onnx \
+      --worker-exe release/win-unpacked/resources/inference/inference-worker.exe
 
 Exits non-zero if any output fails verification. This script performs REAL
 inference; it is not a mock and must not be treated as one.
@@ -16,6 +20,7 @@ inference; it is not a mock and must not be treated as one.
 
 from __future__ import annotations
 import argparse
+import hashlib
 import json
 import os
 import subprocess
@@ -23,6 +28,14 @@ import sys
 import time
 
 WORKER_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "inference", "worker")
+
+
+def sha256_file(path: str) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
 
 
 def ffprobe(path: str) -> dict:
@@ -59,12 +72,22 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="Verify real two-stem separation end-to-end.")
     ap.add_argument("--input", required=True, help="Source audio file")
     ap.add_argument("--out", required=True, help="Output directory for stems")
-    ap.add_argument("--model", default="UVR-MDX-NET-Inst_HQ_5.onnx")
+    ap.add_argument("--model-path", required=True, help="Absolute path to existing compatible ONNX model, never downloaded")
+    ap.add_argument("--worker-exe", help="Optional frozen Windows worker executable (otherwise use Python source worker)")
+    ap.add_argument("--ffprobe-path", default=os.environ.get("LAS_FFPROBE_PATH", "ffprobe"))
     ap.add_argument("--format", default="wav", choices=["wav", "wav24", "mp3", "flac"])
     ap.add_argument("--stems", default="Vocals,Instrumental")
     ap.add_argument("--segment", type=int, default=256, help="MDX segment size (lower = less RAM)")
     args = ap.parse_args()
 
+    if not os.path.isfile(args.model_path):
+        print("Model checkpoint not found; automatic downloads are disabled.", file=sys.stderr)
+        return 2
+    model_path = os.path.abspath(args.model_path)
+    if os.path.basename(model_path) != "UVR-MDX-NET-Inst_HQ_5.onnx":
+        print("Only the verified MDX-Net HQ 5 checkpoint is supported.", file=sys.stderr)
+        return 2
+    os.environ["LAS_FFPROBE_PATH"] = args.ffprobe_path
     src_info = ffprobe(args.input)
     src_streams = [s for s in src_info.get("streams", []) if s.get("codec_type") == "audio"]
     if not src_streams:
@@ -80,8 +103,8 @@ def main() -> int:
     separate_req = {
         "type": "separate",
         "requestId": "verify-1",
-        "modelId": args.model,
-        "modelPath": args.model,
+        "modelId": "UVR-MDX-NET-Inst_HQ_5.onnx",
+        "modelPath": model_path,
         "architecture": "mdx-net",
         "inputPath": os.path.abspath(args.input),
         "outputDir": os.path.abspath(args.out),
@@ -92,8 +115,9 @@ def main() -> int:
     }
 
     t0 = time.time()
+    command = [os.path.abspath(args.worker_exe)] if args.worker_exe else [sys.executable, worker]
     proc = subprocess.Popen(
-        [sys.executable, worker],
+        command,
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
@@ -172,7 +196,19 @@ def main() -> int:
             print(f"  FAIL {stem['stem']:<14} {e}")
             ok = False
 
-    passed = ok and len(result["stems"]) == len(stems)
+    # Distinct filenames alone are insufficient: assert the expected labels
+    # and different binary output. This is a pipeline integrity check, not an SDR
+    # or SI-SDR score of separation quality.
+    actual_stems = [item["stem"] for item in result["stems"]]
+    distinct_files = len({os.path.realpath(item["path"]) for item in result["stems"]}) == len(stems)
+    unique_labels = len(set(actual_stems)) == len(stems) and set(actual_stems) == set(stems)
+    nonidentical_audio = len({
+        sha256_file(item["path"])
+        for item in result["stems"] if os.path.isfile(item["path"])
+    }) == len(stems) if ok else False
+    passed = ok and unique_labels and distinct_files and nonidentical_audio
+    if not passed:
+        print("Output integrity failed: stems must be uniquely labeled, verified and non-identical.", file=sys.stderr)
     print("RESULT:", "PASS" if passed else "FAIL")
     return 0 if passed else 1
 

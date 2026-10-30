@@ -17,10 +17,11 @@ import { app, BrowserWindow, shell, Menu, protocol, net } from "electron";
 import * as path from "node:path";
 import * as fs from "node:fs";
 import { pathToFileURL } from "node:url";
-import { registerIpcHandlers } from "./ipc";
+import { registerIpcHandlers, resolveCompletedStemForPlayback } from "./ipc";
 
 export const isPackaged = app.isPackaged;
 const debugEnabled = process.argv.includes("--vocalizer-debug");
+const smokeMode = process.argv.includes("--vocalizer-smoke-test");
 
 /** Opt-in diagnostics without weakening the secure renderer configuration. */
 function debugLog(message: string): void {
@@ -90,16 +91,80 @@ function createWindow(): void {
   });
 
   mainWindow.on("ready-to-show", () => {
-    mainWindow?.show();
+    if (!smokeMode) mainWindow?.show();
     debugLog("Main window ready-to-show");
-    if (debugEnabled) mainWindow?.webContents.openDevTools({ mode: "detach" });
+    if (debugEnabled && !smokeMode) mainWindow?.webContents.openDevTools({ mode: "detach" });
   });
   mainWindow.webContents.on("did-fail-load", (_event, code, description, url) => {
     debugLog(`Renderer load failure: code=${code} url=${url} detail=${description}`);
+    if (smokeMode && code !== -3) {
+      console.error(`SMOKE_FAIL renderer load: ${description} (${code})`);
+      app.exit(2);
+    }
   });
   mainWindow.webContents.on("render-process-gone", (_event, details) => {
     debugLog(`Renderer process gone: reason=${details.reason} exit=${details.exitCode}`);
   });
+
+  if (smokeMode) {
+    // One-shot packaged-app acceptance probe, without user data or model weights.
+    // CI must observe an actual Electron render + preload + native IPC result;
+    // merely finding Vocalizer.exe is insufficient evidence of a working GUI.
+    const failSafe = setTimeout(() => {
+      console.error("SMOKE_FAIL: packaged application did not initialize in 60 seconds");
+      app.exit(3);
+    }, 60_000);
+    mainWindow.webContents.once("did-finish-load", () => {
+      setTimeout(async () => {
+        try {
+          const fixture = process.env.VOCALIZER_SMOKE_AUDIO;
+          const exportPath = process.env.VOCALIZER_SMOKE_EXPORT;
+          if (!fixture || !exportPath) {
+            throw new Error("Windows smoke fixture paths are not configured.");
+          }
+          const result: {
+            hasBridge: boolean; hasRenderer: boolean;
+            hasFfmpeg: boolean; hasWorker: boolean; nativeAudioVerified: boolean;
+          } = await mainWindow!.webContents.executeJavaScript(`(async () => {
+            const bridge = window.studio;
+            if (!bridge || bridge.isNative !== true) {
+              return { hasBridge: false, hasRenderer: false, hasFfmpeg: false, hasWorker: false, nativeAudioVerified: false };
+            }
+            const system = await bridge.systemInfo();
+            const inference = await bridge.inferenceStatus();
+            const fixture = ${JSON.stringify(fixture)};
+            const outputPath = ${JSON.stringify(exportPath)};
+            const source = await bridge.probeMetadata({ path: fixture });
+            const result = await bridge.runFfmpeg({
+              kind: "trim", jobId: "windows-smoke-trim",
+              inputPath: fixture, outputPath, outputFormat: "wav",
+              startSec: 0, endSec: 0.7
+            });
+            const output = await bridge.probeMetadata({ path: result.outputPath });
+            return {
+              hasBridge: true,
+              hasRenderer: !!document.querySelector("main") && (document.body?.innerText?.length ?? 0) > 100,
+              hasFfmpeg: system.ffmpegAvailable === true,
+              hasWorker: inference.workerAvailable === true,
+              nativeAudioVerified: source.duration > 1 &&
+                result.verified === true && result.sizeBytes > 0 &&
+                output.duration > 0.5 && output.duration < 1
+            };
+          })()`, true);
+          if (!result.hasBridge || !result.hasRenderer || !result.hasFfmpeg || !result.hasWorker || !result.nativeAudioVerified) {
+            throw new Error("Packaged renderer, preload, FFmpeg or worker unavailable: " + JSON.stringify(result));
+          }
+          console.log("SMOKE_PASS " + JSON.stringify(result));
+          clearTimeout(failSafe);
+          app.exit(0);
+        } catch (error) {
+          console.error("SMOKE_FAIL " + String(error));
+          clearTimeout(failSafe);
+          app.exit(4);
+        }
+      }, 1800);
+    });
+  }
 
   if (isPackaged) {
     // Load the renderer through the privileged `las://` protocol so Next.js's
@@ -128,7 +193,7 @@ if (!app.requestSingleInstanceLock()) {
     // Next.js static export uses absolute /_next/... URLs; under file:// these
     // resolve to the filesystem root and 404. The las:// scheme maps every
     // request to a real file in the renderer directory, with traversal rejected.
-    protocol.handle("las", (request) => {
+    protocol.handle("las", async (request) => {
       let relativePath: string;
       try {
         const url = new URL(request.url);
@@ -138,6 +203,23 @@ if (!app.requestSingleInstanceLock()) {
         relativePath = decodeURIComponent(url.pathname).replace(/^\/+/, "");
       } catch {
         return new Response("Bad request", { status: 400 });
+      }
+      // Separate, strictly allowlisted media namespace. Never resolve a
+      // renderer-provided file path; the approved pathname lives in main IPC.
+      if (relativePath.startsWith("__stem-audio/")) {
+        const parts = relativePath.split("/");
+        if (parts.length !== 3 ||
+            !/^[a-zA-Z0-9_-]{1,80}$/.test(parts[1]) ||
+            !["Vocals", "Instrumental"].includes(parts[2])) {
+          return new Response("Not found", { status: 404 });
+        }
+        const media = await resolveCompletedStemForPlayback(parts[1], parts[2]);
+        if (!media) return new Response("Not found", { status: 404 });
+        // Retain byte-range requests for long audio tracks and seeking.
+        const headers = new Headers();
+        const range = request.headers.get("range");
+        if (range) headers.set("range", range);
+        return net.fetch(pathToFileURL(media).href, { headers });
       }
       // Check path components rather than a raw startsWith(base) prefix:
       // C:\\app\\out-evil is NOT inside C:\\app\\out.

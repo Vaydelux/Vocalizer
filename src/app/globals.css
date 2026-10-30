@@ -167,3 +167,18 @@
 .studio-wave div {
   scrollbar-width: thin;
 }
+
+
+/* Accessible keyboard focus, reduced-motion and mobile touch targets. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+#studio-main:focus {
+  outline: none;
+}

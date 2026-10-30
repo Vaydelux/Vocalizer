@@ -68,16 +68,32 @@ async function runAndWrap(op: FfmpegOp, ctx: JobCtx, outputPath: string): Promis
   const unsub = api.onFfmpegProgress((p) => {
     if (p.jobId === op.jobId) ctx.reportProgress(p.progress, p.stage);
   });
+  const onAbort = () => {
+    // AbortController alone does not terminate an Electron child process.
+    void api.cancelFfmpeg({ jobId: op.jobId }).catch(() => {
+      // If the process exited first, the pending run will settle normally.
+    });
+  };
+  if (ctx.signal.aborted) {
+    unsub();
+    throw studioError("CANCELLED", "Cancelled before launching FFmpeg.");
+  }
+  ctx.signal.addEventListener("abort", onAbort, { once: true });
   try {
     const result = await api.runFfmpeg(op);
+    if (ctx.signal.aborted) {
+      throw studioError("CANCELLED", "Cancelled while processing audio.");
+    }
     ctx.log(`Output verified: ${result.outputPath} (${result.sizeBytes} B, ${result.durationSec.toFixed(2)}s).`);
     return {
       name: result.outputPath.split(/[\\/]/).pop() ?? "output",
       size: result.sizeBytes,
-      url: result.outputPath, // absolute disk path; the queue shows "Reveal" natively
+      url: result.outputPath, // absolute disk path; never pass to an HTML download anchor
+      nativePath: true,
       mime: op.outputFormat === "mp3" ? "audio/mpeg" : op.outputFormat === "flac" ? "audio/flac" : "audio/wav",
     };
   } finally {
+    ctx.signal.removeEventListener("abort", onAbort);
     unsub();
   }
 }

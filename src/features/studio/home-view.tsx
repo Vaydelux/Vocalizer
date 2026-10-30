@@ -6,11 +6,12 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
-import { CircleCheck, CircleX, ListMusic, Ellipsis, Scissors, Combine, Music2, KeySquare, MicVocal, Trash2 } from "lucide-react";
+import { CircleCheck, CircleX, ListMusic, Ellipsis, Scissors, Combine, Music2, KeySquare, MicVocal, Trash2, Search, RefreshCcw } from "lucide-react";
 import { PageHeader } from "@/components/studio/page-header";
 import { Dropzone } from "@/components/studio/dropzone";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { useTracks } from "@/lib/studio/store-tracks";
@@ -41,6 +42,8 @@ function StatusBadge({ track }: { track: AudioTrack }) {
 export function HomeView() {
   const tracks = useTracks((s) => s.tracks);
   const removeTrack = useTracks((s) => s.removeTrack);
+  const retryTrack = useTracks((s) => s.retryTrack);
+  const [query, setQuery] = useState("");
   const jobs = useJobs((s) => s.jobs);
   const openTrackWith = useUi((s) => s.openTrackWith);
   const [support, setSupport] = useState<PlaybackSupport[]>([]);
@@ -63,6 +66,14 @@ export function HomeView() {
     [jobs]
   );
   const completed = useMemo(() => jobs.filter((j) => j.state === "completed").length, [jobs]);
+  const visibleTracks = useMemo(() => {
+    const term = query.trim().toLocaleLowerCase();
+    return [...tracks].reverse().filter((track) =>
+      !term || track.name.toLocaleLowerCase().includes(term) ||
+      track.status.toLocaleLowerCase().includes(term) ||
+      (track.meta ? String(track.meta.sampleRate).includes(term) : false)
+    );
+  }, [tracks, query]);
 
   const stats = [
     { label: "Ready tracks", value: ready.length },
@@ -92,14 +103,27 @@ export function HomeView() {
       </div>
 
       <section className="mb-6">
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-sm font-semibold">Library ({tracks.length})</h2>
-          <p className="text-xs text-muted-foreground">Session import list — the desktop build persists recent files to settings</p>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-semibold">Library ({tracks.length})</h2>
+            <p className="text-xs text-muted-foreground">Files imported into this session. Search by name, status or sample rate.</p>
+          </div>
+          {tracks.length > 0 && (
+            <div className="relative w-full max-w-xs">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
+              <Input aria-label="Search imported tracks" placeholder="Search library…" className="pl-9"
+                value={query} onChange={(event) => setQuery(event.target.value)} />
+            </div>
+          )}
         </div>
         {tracks.length === 0 ? (
           <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border py-10 text-center">
             <ListMusic className="mb-2 h-6 w-6 text-muted-foreground" aria-hidden />
             <p className="text-sm text-muted-foreground">No audio imported yet. Drop files above to begin.</p>
+          </div>
+        ) : visibleTracks.length === 0 ? (
+          <div role="status" className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
+            No tracks match “{query}”. Try a different search.
           </div>
         ) : (
           <div className="studio-scroll max-h-96 overflow-y-auto rounded-xl border border-border">
@@ -117,7 +141,7 @@ export function HomeView() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {[...tracks].reverse().map((t) => (
+                {visibleTracks.map((t) => (
                   <TableRow key={t.id}>
                     <TableCell className="max-w-[280px]">
                       <p className="truncate font-medium" title={t.name}>{t.name}</p>
@@ -155,6 +179,11 @@ export function HomeView() {
                           <DropdownMenuItem disabled={t.status !== "ready"} onClick={() => openTrackWith(t.id, "karaoke")}>
                             <MicVocal className="h-4 w-4" aria-hidden /> Karaoke
                           </DropdownMenuItem>
+                          {t.status === "error" && (
+                            <DropdownMenuItem onClick={() => retryTrack(t.id)}>
+                              <RefreshCcw className="h-4 w-4" aria-hidden /> Retry import
+                            </DropdownMenuItem>
+                          )}
                           <DropdownMenuSeparator />
                           <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => removeTrack(t.id)}>
                             <Trash2 className="h-4 w-4" aria-hidden /> Remove from library

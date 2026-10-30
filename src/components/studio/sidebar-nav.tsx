@@ -49,9 +49,10 @@ const GROUPS: { title: string; items: NavItem[] }[] = [
   },
 ];
 
-export function SidebarNav() {
+export function SidebarNav({ mobile = false, onNavigate }: { mobile?: boolean; onNavigate?: () => void } = {}) {
   const activeView = useUi((s) => s.activeView);
-  const collapsed = useUi((s) => s.sidebarCollapsed);
+  const collapsedSetting = useUi((s) => s.sidebarCollapsed);
+  const collapsed = mobile ? false : collapsedSetting;
   const setView = useUi((s) => s.setView);
   const toggleSidebar = useUi((s) => s.toggleSidebar);
   const jobs = useJobs((s) => s.jobs);
@@ -63,11 +64,11 @@ export function SidebarNav() {
         {/* Brand */}
         <div className={cn("flex h-14 shrink-0 items-center gap-2.5 border-b border-border px-3", collapsed && "justify-center px-2")}>
           <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/15">
-            <AudioLines className="h-4.5 w-4.5 h-5 w-5 text-primary" aria-hidden />
+            <AudioLines className="h-5 w-5 text-primary" aria-hidden />
           </div>
           {!collapsed && (
             <div className="min-w-0">
-              <p className="truncate text-sm font-semibold tracking-tight">Local Audio Studio</p>
+              <p className="truncate text-sm font-semibold tracking-tight">Vocalizer</p>
               <p className="truncate text-[10px] text-muted-foreground">Offline · Local-first</p>
             </div>
           )}
@@ -89,10 +90,11 @@ export function SidebarNav() {
                   const button = (
                     <button
                       type="button"
-                      onClick={() => setView(item.id)}
+                      onClick={() => { setView(item.id); onNavigate?.(); }}
                       aria-current={active ? "page" : undefined}
+                      aria-label={collapsed ? item.label : undefined}
                       className={cn(
-                        "flex h-9 w-full items-center gap-2.5 rounded-lg px-2.5 text-sm transition-colors",
+                        "flex min-h-10 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                         collapsed && "justify-center px-0",
                         active
                           ? "bg-primary/15 font-medium text-foreground"
@@ -134,7 +136,11 @@ export function SidebarNav() {
 
         {/* Footer */}
         <div className={cn("shrink-0 border-t border-border p-3", collapsed && "px-2")}>
-          {collapsed ? (
+          {mobile ? (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <ShieldCheck className="h-4 w-4" aria-hidden /> Local processing · no cloud uploads
+            </div>
+          ) : collapsed ? (
             <div className="flex flex-col items-center gap-2">
               <Tooltip>
                 <TooltipTrigger asChild>

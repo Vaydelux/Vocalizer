@@ -15,7 +15,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { useJobs } from "@/lib/studio/store-jobs";
-import { downloadResult } from "@/lib/studio/download";
+import { openJobResult } from "@/lib/studio/open-result";
 import { formatBytes } from "@/lib/studio/format";
 import type { JobState } from "@/lib/studio/types";
 import { cn } from "@/lib/utils";
@@ -70,9 +70,9 @@ function JobCard({ jobId }: { jobId: string }) {
               variant="secondary"
               size="sm"
               className="h-8 gap-1.5 text-xs"
-              onClick={() => downloadResult(job.result!.url, job.result!.name)}
+              onClick={() => void openJobResult(job)}
             >
-              <Download className="h-3.5 w-3.5" aria-hidden /> {job.result.stemFiles ? "Save stem manifest" : `Save ${formatBytes(job.result.size)}`}
+              <Download className="h-3.5 w-3.5" aria-hidden /> {job.result.nativePath ? "Show output" : job.result.stemFiles ? "Save stem manifest" : `Save ${formatBytes(job.result.size)}`}
             </Button>
           )}
           {!active && (

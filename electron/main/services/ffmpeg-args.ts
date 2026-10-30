@@ -35,7 +35,7 @@ function buildTrim(op: Extract<FfmpegOp, { kind: "trim" }>): BuiltCommand {
   const duration = Math.max(0, op.endSec - op.startSec);
   return {
     argv: [
-      "-y",
+      "-nostdin", "-n",
       "-ss", op.startSec.toFixed(6),
       "-i", op.inputPath,
       "-t", duration.toFixed(6),
@@ -59,7 +59,7 @@ function buildJoin(op: Extract<FfmpegOp, { kind: "join" }>): BuiltCommand {
   const filter = `${labels}concat=n=${n}:v=0:a=1[out]`;
   return {
     argv: [
-      "-y",
+      "-nostdin", "-n",
       ...inputs,
       "-filter_complex", filter,
       "-map", "[out]",
@@ -91,7 +91,7 @@ function buildPitch(op: Extract<FfmpegOp, { kind: "pitch" }>): BuiltCommand {
       filters.push(`rubberband=tempo=${op.tempo.toFixed(4)}`);
     }
     return {
-      argv: ["-y", "-i", op.inputPath, "-vn", "-af", filters.join(","), "-acodec", enc.codec, ...enc.extra, op.outputPath],
+      argv: ["-nostdin", "-n", "-i", op.inputPath, "-vn", "-af", filters.join(","), "-acodec", enc.codec, ...enc.extra, op.outputPath],
       requiresRubberBand: true,
     };
   }
@@ -102,7 +102,7 @@ function buildPitch(op: Extract<FfmpegOp, { kind: "pitch" }>): BuiltCommand {
   const atempo = op.tempo / pitchRatio;
   const filters = [`asetrate=44100*${pitchRatio.toFixed(6)}`, `atempo=${atempo.toFixed(6)}`, "aresample=async=1"];
   return {
-    argv: ["-y", "-i", op.inputPath, "-vn", "-af", filters.join(","), "-acodec", enc.codec, ...enc.extra, op.outputPath],
+    argv: ["-nostdin", "-n", "-i", op.inputPath, "-vn", "-af", filters.join(","), "-acodec", enc.codec, ...enc.extra, op.outputPath],
     requiresRubberBand: false,
   };
 }
@@ -113,7 +113,7 @@ function buildConvert(op: Extract<FfmpegOp, { kind: "convert" }>): BuiltCommand 
   const extra: string[] = [];
   if (op.sampleRate) extra.push("-ar", String(op.sampleRate));
   return {
-    argv: ["-y", "-i", op.inputPath, "-vn", "-acodec", enc.codec, ...enc.extra, ...extra, op.outputPath],
+    argv: ["-nostdin", "-n", "-i", op.inputPath, "-vn", "-acodec", enc.codec, ...enc.extra, ...extra, op.outputPath],
     requiresRubberBand: false,
   };
 }
@@ -129,7 +129,7 @@ function buildMix(op: Extract<FfmpegOp, { kind: "mix" }>): BuiltCommand {
     `[i][v]amix=inputs=2:duration=longest:normalize=0[out]`,
   ].join(";");
   return {
-    argv: ["-y", "-i", op.instrumentalPath, "-i", op.vocalPath, "-filter_complex", filter, "-map", "[out]", "-acodec", enc.codec, ...enc.extra, op.outputPath],
+    argv: ["-nostdin", "-n", "-i", op.instrumentalPath, "-i", op.vocalPath, "-filter_complex", filter, "-map", "[out]", "-acodec", enc.codec, ...enc.extra, op.outputPath],
     requiresRubberBand: false,
   };
 }

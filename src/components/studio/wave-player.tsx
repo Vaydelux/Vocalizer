@@ -87,6 +87,7 @@ const WavePlayerImpl: ForwardRefRenderFunction<WavePlayerHandle, Props> = (
   ref
 ) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const playerRef = useRef<HTMLDivElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const peaksRef = useRef<Peaks | null>(null);
@@ -128,6 +129,14 @@ const WavePlayerImpl: ForwardRefRenderFunction<WavePlayerHandle, Props> = (
     audioRef.current = audio;
     audio.volume = muted ? 0 : volume;
 
+    const onLoadStart = () => {
+      if (cancelled) return;
+      setError(null);
+      setReady(false);
+      setPlaying(false);
+      setCurrentTime(0);
+      setDuration(0);
+    };
     const onLoaded = () => {
       if (cancelled) return;
       if (Number.isFinite(audio.duration) && audio.duration > 0) {
@@ -148,8 +157,11 @@ const WavePlayerImpl: ForwardRefRenderFunction<WavePlayerHandle, Props> = (
     const onEnded = () => !cancelled && setPlaying(false);
     const onError = () => {
       if (cancelled) return;
-      setError("The audio element could not load this file.");
+      setPlaying(false);
+      setReady(false);
+      setError("This file could not be played. Try re-importing it, or convert it to WAV.");
     };
+    audio.addEventListener("loadstart", onLoadStart);
     audio.addEventListener("loadedmetadata", onLoaded);
     audio.addEventListener("durationchange", onLoaded);
     audio.addEventListener("timeupdate", onTime);
@@ -157,6 +169,7 @@ const WavePlayerImpl: ForwardRefRenderFunction<WavePlayerHandle, Props> = (
     audio.addEventListener("pause", onPause);
     audio.addEventListener("ended", onEnded);
     audio.addEventListener("error", onError);
+    peaksRef.current = null;
     audio.src = track.url;
     audio.load();
 
@@ -191,6 +204,7 @@ const WavePlayerImpl: ForwardRefRenderFunction<WavePlayerHandle, Props> = (
     return () => {
       cancelled = true;
       cancelAnimationFrame(rafRef.current);
+      audio.removeEventListener("loadstart", onLoadStart);
       audio.removeEventListener("loadedmetadata", onLoaded);
       audio.removeEventListener("durationchange", onLoaded);
       audio.removeEventListener("timeupdate", onTime);
@@ -334,9 +348,17 @@ const WavePlayerImpl: ForwardRefRenderFunction<WavePlayerHandle, Props> = (
 
   /* --------------------------------- controls -------------------------------- */
   const togglePlay = useCallback(() => {
-    void audioRef.current?.play().then(() => undefined).catch(() => undefined);
-    if (playing) audioRef.current?.pause();
-  }, [playing]);
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (!audio.paused) {
+      audio.pause();
+      return;
+    }
+    void audio.play().catch((err: unknown) => {
+      setPlaying(false);
+      setError(err instanceof Error ? `Playback failed: ${err.message}` : "Audio playback was blocked.");
+    });
+  }, []);
 
   const stop = useCallback(() => {
     const a = audioRef.current;
@@ -358,7 +380,7 @@ const WavePlayerImpl: ForwardRefRenderFunction<WavePlayerHandle, Props> = (
     const r = regionRef.current;
     if (!a || !r) return;
     a.currentTime = r.start;
-    void a.play().catch(() => undefined);
+    void a.play().catch((err: unknown) => setError(err instanceof Error ? err.message : "Could not play the selected region."));
   }, []);
 
   const setRegion = useCallback(
@@ -420,7 +442,8 @@ const WavePlayerImpl: ForwardRefRenderFunction<WavePlayerHandle, Props> = (
       const scroll = scrollRef.current;
       if (!canvas || !scroll) return 0;
       const rect = canvas.getBoundingClientRect();
-      const x = clientX - rect.left + scroll.scrollLeft;
+      // The canvas rectangle already reflects horizontal scrolling.
+      const x = clientX - rect.left;
       const pxPerSec = zoomRef.current || (width > 0 && duration > 0 ? width / duration : 1);
       return clamp(x / pxPerSec, 0, duration);
     },
@@ -429,7 +452,7 @@ const WavePlayerImpl: ForwardRefRenderFunction<WavePlayerHandle, Props> = (
 
   const onPointerDown = useCallback(
     (e: React.PointerEvent<HTMLCanvasElement>) => {
-      if (!withRegion && !ready) return;
+      if (!ready) return;
       const t = timeFromX(e.clientX);
       dragRef.current = { active: true, startX: e.clientX, moved: false };
       if (withRegion && e.shiftKey) {
@@ -492,7 +515,14 @@ const WavePlayerImpl: ForwardRefRenderFunction<WavePlayerHandle, Props> = (
       );
     };
     const onKey = (e: KeyboardEvent): void => {
-      if (isTypingTarget(e.target) || !audioRef.current) return;
+      if (e.altKey || e.ctrlKey || e.metaKey || isTypingTarget(e.target) || !audioRef.current) return;
+      // Only a focused player handles keyboard transport. Do not steal keys
+      // from the rest of the application or from nested buttons/sliders.
+      const active = document.activeElement;
+      if (!active || !playerRef.current?.contains(active) ||
+          (active instanceof HTMLElement && active.closest("button, [role='slider'], [role='dialog'], [role='menu']"))) {
+        return;
+      }
       const a = audioRef.current;
       const step = e.shiftKey ? 10 : 2;
       switch (e.key) {
@@ -548,7 +578,7 @@ const WavePlayerImpl: ForwardRefRenderFunction<WavePlayerHandle, Props> = (
   void zoom;
 
   return (
-    <div className={cn("rounded-xl border border-border bg-card", className)}>
+    <div ref={playerRef} className={cn("rounded-xl border border-border bg-card", className)}>
       <div className="relative px-4 pt-4">
         <div ref={scrollRef} className="studio-scroll relative w-full overflow-x-auto overflow-y-hidden" style={{ height }}>
           <canvas
@@ -562,6 +592,20 @@ const WavePlayerImpl: ForwardRefRenderFunction<WavePlayerHandle, Props> = (
             aria-valuemin={0}
             aria-valuemax={Math.round(duration)}
             aria-valuenow={Math.round(currentTime)}
+            aria-valuetext={`${formatTime(currentTime)} of ${formatTime(duration)}`}
+            tabIndex={ready ? 0 : -1}
+            onKeyDown={(event) => {
+              if (!ready) return;
+              if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
+                event.preventDefault();
+                event.stopPropagation();
+                seek(currentTime + (event.key === "ArrowRight" ? 2 : -2));
+              } else if (event.key === "Home" || event.key === "End") {
+                event.preventDefault();
+                event.stopPropagation();
+                seek(event.key === "Home" ? 0 : duration);
+              }
+            }}
             style={{ height }}
           />
         </div>
@@ -574,8 +618,14 @@ const WavePlayerImpl: ForwardRefRenderFunction<WavePlayerHandle, Props> = (
           </div>
         )}
         {error && (
-          <div className="absolute inset-0 flex items-center justify-center bg-card/90 p-4 text-center">
+          <div role="alert" className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-card/90 p-4 text-center">
             <p className="text-xs text-destructive">Audio error: {error}</p>
+            <Button size="sm" variant="outline" onClick={() => {
+              const a = audioRef.current;
+              if (!a) return;
+              setError(null);
+              a.load();
+            }}>Retry playback</Button>
           </div>
         )}
       </div>

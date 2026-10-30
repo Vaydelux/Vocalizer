@@ -42,10 +42,26 @@ import {
   type InferenceSeparateResult,
 } from "../../shared/ipc";
 
-/** True only for the renderer's own webContents — defends against cross-window IPC. */
+/** Authorize only the main application's top-level renderer.
+ * Other Electron windows, unexpected subframes and external origins cannot
+ * access filesystem dialogs, media execution or worker process controls. */
+let getPrimaryWindow: (() => BrowserWindow | null) | null = null;
 function assertSender(event: IpcMainInvokeEvent): WebContents {
-  const win = BrowserWindow.fromWebContents(event.sender);
-  if (!win) throw studioError("PERMISSION_DENIED", "IPC sender is not a recognized window.");
+  const expected = getPrimaryWindow?.();
+  if (!expected || expected.isDestroyed() || event.sender !== expected.webContents ||
+      event.senderFrame !== expected.webContents.mainFrame) {
+    throw studioError("PERMISSION_DENIED", "IPC sender is not Vocalizer's main application frame.");
+  }
+  let allowed = false;
+  try {
+    const frame = new URL(event.senderFrame.url);
+    allowed = expected.webContents.getURL().startsWith("las://")
+      ? frame.protocol === "las:" && frame.hostname === "renderer"
+      : frame.protocol === "http:" && frame.hostname === "localhost" && frame.port === "3000";
+  } catch {
+    // Reject malformed and untrusted origins.
+  }
+  if (!allowed) throw studioError("PERMISSION_DENIED", "IPC operation rejected for an untrusted application origin.");
   return event.sender;
 }
 
@@ -83,9 +99,29 @@ async function verifyLocalMdxModel(modelId: string, modelPath: string, architect
   }
 }
 
-// Only completed, validated inference results may be revealed via IPC.
+// Only completed, validated inference results may be revealed or played.
 const completedInferenceStems = new Map<string, Map<string, string>>();
-export function registerIpcHandlers(_getMainWindow: () => BrowserWindow | null): void {
+const completedFfmpegOutputs = new Map<string, string>();
+const ALLOWED_STEMS = new Set(["Vocals", "Instrumental"]);
+
+/** Playback is restricted to exact paths already verified by the main process.
+ * This API is never exposed through the preload bridge. */
+export async function resolveCompletedStemForPlayback(jobId: string, stem: string): Promise<string | null> {
+  if (!ALLOWED_STEMS.has(stem)) return null;
+  const registered = completedInferenceStems.get(jobId)?.get(stem);
+  if (!registered) return null;
+  try {
+    const real = await fs.promises.realpath(registered);
+    const stat = await fs.promises.stat(real);
+    if (real !== registered || !stat.isFile()) return null;
+    if (![".wav", ".flac", ".mp3"].includes(path.extname(real).toLowerCase())) return null;
+    return real;
+  } catch {
+    return null;
+  }
+}
+export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): void {
+  getPrimaryWindow = getMainWindow;
   /* --------------------------------- dialogs -------------------------------- */
   ipcMain.handle(IPC.DIALOG_OPEN_FILES, async (event, raw) => {
     assertSender(event);
@@ -141,7 +177,20 @@ export function registerIpcHandlers(_getMainWindow: () => BrowserWindow | null):
       if (!sender.isDestroyed()) sender.send(IPC.FFMPEG_PROGRESS, p);
     };
     try {
-      return await runFfmpeg(op, emit);
+      const result = await runFfmpeg(op, emit);
+      if (!result.verified) {
+        throw studioError("ENCODE_FAILED", "FFmpeg output has not been verified.");
+      }
+      const outputPath = await fs.promises.realpath(result.outputPath);
+      if (!(await fs.promises.stat(outputPath)).isFile()) {
+        throw studioError("OUTPUT_EMPTY", "FFmpeg output is no longer a valid file.");
+      }
+      completedFfmpegOutputs.set(op.jobId, outputPath);
+      if (completedFfmpegOutputs.size > 50) {
+        const oldest = completedFfmpegOutputs.keys().next().value;
+        if (oldest) completedFfmpegOutputs.delete(oldest);
+      }
+      return result;
     } catch (err) {
       throw toMainErrorPayload(err);
     }
@@ -151,6 +200,23 @@ export function registerIpcHandlers(_getMainWindow: () => BrowserWindow | null):
     assertSender(event);
     const req = cancelRequestSchema.parse(raw);
     return { cancelled: cancelJob(req.jobId) };
+  });
+
+  ipcMain.handle(IPC.FFMPEG_REVEAL_OUTPUT, async (event, raw) => {
+    assertSender(event);
+    const req = cancelRequestSchema.parse(raw);
+    const registered = completedFfmpegOutputs.get(req.jobId);
+    if (!registered) throw studioError("PERMISSION_DENIED", "No verified export is registered for this job.");
+    try {
+      const real = await fs.promises.realpath(registered);
+      if (real !== registered || !(await fs.promises.stat(real)).isFile()) {
+        throw new Error("Export is missing or moved.");
+      }
+      shell.showItemInFolder(real);
+      return { revealed: true };
+    } catch {
+      throw studioError("MISSING_FILE", "The completed export no longer exists on disk.");
+    }
   });
 
   /* --------------------------------- settings ------------------------------- */
@@ -207,7 +273,15 @@ export function registerIpcHandlers(_getMainWindow: () => BrowserWindow | null):
       if (result.type === "result") {
         const root = await fs.promises.realpath(req.outputDir);
         const approved = new Map<string, string>();
+        const expected = new Set(req.requestedStems);
+        if (expected.size !== 2 || !expected.has("Vocals") || !expected.has("Instrumental") ||
+            result.stems.length !== expected.size) {
+          throw studioError("INFERENCE_FAILED", "The worker did not return the two expected stems.");
+        }
         for (const item of result.stems) {
+          if (!expected.has(item.stem) || approved.has(item.stem)) {
+            throw studioError("INFERENCE_FAILED", "The worker returned an unexpected or duplicate stem.");
+          }
           const resolved = await fs.promises.realpath(item.path);
           const relative = path.relative(root, resolved);
           const inside = Boolean(relative) && relative !== ".." &&
@@ -217,6 +291,9 @@ export function registerIpcHandlers(_getMainWindow: () => BrowserWindow | null):
             throw studioError("INFERENCE_FAILED", "Inference returned an output outside the approved folder or with an invalid format.");
           }
           approved.set(item.stem, resolved);
+        }
+        if (approved.size !== expected.size) {
+          throw studioError("INFERENCE_FAILED", "The worker did not return one file for each requested stem.");
         }
         completedInferenceStems.set(req.jobId, approved);
         if (completedInferenceStems.size > 50) {

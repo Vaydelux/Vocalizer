@@ -18,9 +18,9 @@
 
 import { spawn, type ChildProcess } from "node:child_process";
 import * as fs from "node:fs";
-import * as path from "node:path";
 import { buildFfmpegCommand } from "./ffmpeg-args";
 import { getFfmpegPath } from "./paths";
+import { createStagedOutput, publishStagedOutput, cleanupStagedOutput } from "./export-file";
 import { probeFile } from "./ffprobe";
 import { studioError, toMainErrorPayload, type MainErrorCode } from "./errors";
 import type { FfmpegOp, FfmpegResult, FfmpegProgress } from "../../shared/ipc";
@@ -41,20 +41,23 @@ export async function runFfmpeg(op: FfmpegOp, emit: ProgressEmitter): Promise<Ff
   if (!ffmpeg) {
     throw studioError("CAPABILITY_UNAVAILABLE", "FFmpeg binary is not bundled. Bundle it via electron-builder extraResources.");
   }
-  const built = buildFfmpegCommand(op);
-  // The argv from the builder excludes the binary; prepend it.
-  const argv = built.argv;
-
-  // Ensure the output directory exists.
-  try {
-    fs.mkdirSync(path.dirname(op.outputPath), { recursive: true });
-  } catch {
-    throw studioError("PERMISSION_DENIED", `Cannot create output directory for ${op.outputPath}`);
+  if (activeJobs.has(op.jobId)) {
+    throw studioError("INPUT_INVALID", "A native audio operation already uses this job ID.");
   }
+  let stagedPath: string;
+  try {
+    // Never feed FFmpeg the destination path. A failed -y output previously
+    // truncated or deleted user files, including pre-existing ones.
+    stagedPath = createStagedOutput(op.outputPath);
+  } catch (error) {
+    throw studioError("PERMISSION_DENIED", error instanceof Error ? error.message : "Cannot prepare an audio export.");
+  }
+  const built = buildFfmpegCommand({ ...op, outputPath: stagedPath });
+  const argv = built.argv;
 
   return new Promise<FfmpegResult>((resolve, reject) => {
     const proc = spawn(ffmpeg, argv, { shell: false, windowsHide: true });
-    const handle: RunHandle = { proc, outputPath: op.outputPath, aborted: false };
+    const handle: RunHandle = { proc, outputPath: stagedPath, aborted: false };
     activeJobs.set(op.jobId, handle);
 
     let stderr = "";
@@ -68,7 +71,8 @@ export async function runFfmpeg(op: FfmpegOp, emit: ProgressEmitter): Promise<Ff
     });
 
     proc.stderr.on("data", (chunk: Buffer) => {
-      stderr += chunk.toString();
+      // Avoid unbounded RAM use from large FFmpeg error logs.
+      stderr = (stderr + chunk.toString()).slice(-4096);
     });
     proc.stdout.on("data", (chunk: Buffer) => {
       const text = chunk.toString();
@@ -83,28 +87,37 @@ export async function runFfmpeg(op: FfmpegOp, emit: ProgressEmitter): Promise<Ff
 
     proc.on("error", (err) => {
       activeJobs.delete(op.jobId);
+      cleanupStagedOutput(stagedPath);
       reject(studioError("ENCODE_FAILED", `FFmpeg spawn failed: ${err.message}`));
     });
 
     proc.on("close", (code) => {
       activeJobs.delete(op.jobId);
       if (handle.aborted) {
-        cleanupOutput(op.outputPath);
+        cleanupStagedOutput(stagedPath);
         reject(studioError("CANCELLED"));
         return;
       }
       if (code !== 0) {
-        cleanupOutput(op.outputPath);
+        cleanupStagedOutput(stagedPath);
         const detail = stderr.slice(-400);
         reject(studioError("ENCODE_FAILED", `FFmpeg exited ${code}. ${detail}`));
         return;
       }
       // Verify the output: exists, non-zero size, decodable.
-      verifyOutput(op.outputPath)
+      verifyOutput(stagedPath)
         .then((verified) => {
           if (!verified.verified) {
-            cleanupOutput(op.outputPath);
-            reject(studioError("OUTPUT_EMPTY", `Output verification failed for ${op.outputPath}`));
+            cleanupStagedOutput(stagedPath);
+            reject(studioError("OUTPUT_EMPTY", "The encoded output failed audio verification."));
+            return;
+          }
+          try {
+            publishStagedOutput(stagedPath, op.outputPath);
+          } catch (error) {
+            cleanupStagedOutput(stagedPath);
+            reject(studioError("PERMISSION_DENIED",
+              `Could not publish the verified audio file without overwriting another file: ${String(error)}`));
             return;
           }
           emit({ jobId: op.jobId, progress: 1, stage: "Completed" });
@@ -115,7 +128,10 @@ export async function runFfmpeg(op: FfmpegOp, emit: ProgressEmitter): Promise<Ff
             verified: true,
           });
         })
-        .catch((err) => reject(err));
+        .catch((err) => {
+          cleanupStagedOutput(stagedPath);
+          reject(err);
+        });
     });
   });
 }
@@ -128,7 +144,18 @@ export function cancelJob(jobId: string): boolean {
   try {
     if (process.platform === "win32") {
       // Windows: kill the whole tree via taskkill (FFmpeg may spawn children).
-      spawn("taskkill", ["/PID", String(handle.proc.pid), "/T", "/F"], { shell: false, windowsHide: true });
+      if (handle.proc.pid) {
+        const killer = spawn("taskkill", ["/PID", String(handle.proc.pid), "/T", "/F"], {
+          shell: false, windowsHide: true, stdio: "ignore",
+        });
+        killer.once("error", () => {
+          // On restricted hosts, try stopping the parent rather than crashing
+          // the entire Electron main process on an unhandled spawn error.
+          try { handle.proc.kill(); } catch { /* already exited */ }
+        });
+      } else {
+        try { handle.proc.kill(); } catch { /* already exited */ }
+      }
     } else {
       handle.proc.kill("SIGTERM");
       setTimeout(() => {
@@ -170,14 +197,6 @@ async function verifyOutput(outputPath: string): Promise<{ verified: boolean; si
     return { verified: meta.duration > 0, sizeBytes, durationSec: meta.duration };
   } catch {
     return { verified: false, sizeBytes, durationSec: 0 };
-  }
-}
-
-function cleanupOutput(outputPath: string): void {
-  try {
-    if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
-  } catch {
-    /* best-effort; partial files are not reported as completed */
   }
 }
 

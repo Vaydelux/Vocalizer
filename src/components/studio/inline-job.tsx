@@ -9,7 +9,7 @@ import { Download, LoaderCircle, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { useJobs } from "@/lib/studio/store-jobs";
-import { downloadResult } from "@/lib/studio/download";
+import { openJobResult } from "@/lib/studio/open-result";
 import { formatBytes } from "@/lib/studio/format";
 
 export function InlineJob({ jobId, className }: { jobId: string; className?: string }) {
@@ -44,9 +44,9 @@ export function InlineJob({ jobId, className }: { jobId: string; className?: str
             variant="secondary"
             size="sm"
             className="h-7 gap-1.5 text-xs"
-            onClick={() => downloadResult(job.result!.url, job.result!.name)}
+            onClick={() => void openJobResult(job)}
           >
-            <Download className="h-3.5 w-3.5" aria-hidden /> Save ({formatBytes(job.result.size)})
+            <Download className="h-3.5 w-3.5" aria-hidden /> {job.result.nativePath ? "Show output" : job.result.stemFiles ? "Save stem manifest" : `Save (${formatBytes(job.result.size)})`}
           </Button>
         )}
       </div>

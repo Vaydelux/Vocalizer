@@ -6,6 +6,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { randomUUID } from "node:crypto";
 import { app } from "electron";
 import { nativeSettingsSchema, type NativeSettings } from "../../shared/ipc";
 
@@ -57,9 +58,19 @@ export function setSettings(patch: Partial<NativeSettings>): NativeSettings {
 }
 
 function persist(settings: NativeSettings): void {
+  const dest = settingsFile();
+  const temp = path.join(path.dirname(dest), `.settings-${randomUUID()}.tmp`);
   try {
-    fs.writeFileSync(settingsFile(), JSON.stringify(settings, null, 2), "utf8");
-  } catch {
-    /* permission errors are non-fatal; settings stay in-memory for the session */
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    // Never truncate the last valid settings file before a new JSON document
+    // is complete. Rename replaces the old data only after the write succeeds.
+    fs.writeFileSync(temp, JSON.stringify(settings, null, 2), { encoding: "utf8", mode: 0o600 });
+    fs.renameSync(temp, dest);
+  } catch (error) {
+    // Permission errors leave in-memory settings usable for this session.
+    // Surface a diagnostic instead of silently claiming persistence succeeded.
+    console.error("[Vocalizer settings] Could not persist settings:", error);
+  } finally {
+    try { fs.unlinkSync(temp); } catch { /* renamed or best-effort cleanup */ }
   }
 }

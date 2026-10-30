@@ -12,7 +12,7 @@ on:
         type: boolean
         default: false
   push:
-    branches: [main, phase2/windows-inference-integration]
+    branches: [main, phase3/windows-acceptance-and-stem-playback]
 
 permissions:
   contents: read
@@ -114,6 +114,28 @@ jobs:
           No installer is required. No default AI model weights are bundled.
           This unsigned build has not completed Windows GUI/runtime acceptance.
           '@ | Set-Content -Encoding UTF8 (Join-Path $root "README-DEBUG.txt")
+          # Generate synthetic, original audio to verify a real native
+          # Electron IPC -> FFmpeg trim -> FFprobe workflow.
+          $env:VOCALIZER_SMOKE_AUDIO = Join-Path $env:RUNNER_TEMP "vocalizer-smoke-input.wav"
+          $env:VOCALIZER_SMOKE_EXPORT = Join-Path $env:RUNNER_TEMP "vocalizer-smoke-output.wav"
+          & (Join-Path $root "resources/binaries/ffmpeg.exe") -hide_banner -loglevel error -nostdin -n -f lavfi -i "sine=frequency=440:duration=2" -c:a pcm_s16le $env:VOCALIZER_SMOKE_AUDIO
+          if ($LASTEXITCODE -ne 0) { throw "Could not generate synthetic smoke audio" }
+          # Test actual packaged Electron UI, preload, native FFmpeg/FFprobe,
+          # worker detection, and media export. Not a real AI model test.
+          $stdout = Join-Path $env:RUNNER_TEMP "vocalizer-smoke.stdout.log"
+          $stderr = Join-Path $env:RUNNER_TEMP "vocalizer-smoke.stderr.log"
+          $process = Start-Process -FilePath (Resolve-Path $exe).Path `
+            -ArgumentList "--vocalizer-smoke-test" -PassThru `
+            -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+          if (!$process.WaitForExit(90000)) {
+            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+            throw "Packaged Electron startup smoke test exceeded 90 seconds"
+          }
+          $exitCode = $process.ExitCode
+          if (Test-Path $stdout) { Get-Content $stdout | Select-Object -Last 40 }
+          if (Test-Path $stderr) { Get-Content $stderr | Select-Object -Last 40 }
+          if ($exitCode -ne 0) { throw "Packaged Electron startup smoke failed with exit code $exitCode" }
+          Write-Host "Packaged Electron startup smoke PASSED"
           $name = "Vocalizer-$env:BUILD_DATE-Windows-x64-Debug"
           $zip = Join-Path "release" "$name.zip"
           Add-Type -AssemblyName System.IO.Compression.FileSystem

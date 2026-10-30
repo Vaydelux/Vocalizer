@@ -20,6 +20,7 @@ interface TracksStore {
   tracks: AudioTrack[];
   addFiles: (files: File[] | FileList) => void;
   removeTrack: (id: string) => void;
+  retryTrack: (id: string) => void;
   clearAll: () => void;
 }
 
@@ -56,7 +57,19 @@ export const useTracks = create<TracksStore>((set, get) => ({
     const incoming = Array.from(files);
     if (incoming.length === 0) return;
     const added: AudioTrack[] = [];
+    const existing = new Set(get().tracks.map((t) => `${t.name}| ${t.size}|${t.file.lastModified}`));
+    let duplicateCount = 0;
     for (const file of incoming) {
+      const key = `${file.name}| ${file.size}|${file.lastModified}`;
+      if (existing.has(key)) {
+        duplicateCount++;
+        continue;
+      }
+      existing.add(key);
+      if (file.size === 0) {
+        toast.error(`Import failed: ${file.name}`, { description: "The selected file is empty." });
+        continue;
+      }
       if (file.size > MAX_IMPORT_BYTES) {
         toast.error(`Import failed: ${file.name}`, {
           description: `[FILE_TOO_LARGE] ${formatBytes(file.size)} exceeds the ${formatBytes(
@@ -78,6 +91,9 @@ export const useTracks = create<TracksStore>((set, get) => ({
       };
       added.push(track);
     }
+    if (duplicateCount > 0) {
+      toast.info(`Skipped ${duplicateCount} duplicate file${duplicateCount === 1 ? "" : "s"}`);
+    }
     if (added.length === 0) return;
     set((s) => ({ tracks: [...s.tracks, ...added] }));
     toast.info(
@@ -85,6 +101,15 @@ export const useTracks = create<TracksStore>((set, get) => ({
       { description: "Validating with the audio decoder — not just the file extension." }
     );
     for (const t of added) void probeTrack(t);
+  },
+  retryTrack: (id) => {
+    const track = get().tracks.find((t) => t.id === id);
+    if (!track || track.status === "checking") return;
+    set((s) => ({
+      tracks: s.tracks.map((t) => t.id === id
+        ? { ...t, status: "checking", error: undefined, meta: null } : t),
+    }));
+    void probeTrack(track);
   },
   removeTrack: (id) => {
     const track = get().tracks.find((t) => t.id === id);

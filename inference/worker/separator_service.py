@@ -15,6 +15,7 @@ from audio_separator.separator import Separator as ASeparator
 from errors import WorkerError
 from audio_validation import verify_audio_file
 from local_model import require_local_mdx_model
+from stem_mapping import match_stems
 
 # Map a requested stem name to the audio-separator output-token convention.
 # MDX-Net Inst-HQ produces two files named "<input>_(Vocals)_..." and
@@ -61,7 +62,7 @@ class SeparatorService:
 
         on_progress(None, "Preparing")
         # Reuse a Separator per output format (the underlying model is cached).
-        cache_key = f"{architecture}:{verified_model}:{output_format}:{segment_size}"
+        cache_key = f"{architecture}:{verified_model}:{output_dir}:{output_format}:{segment_size}"
         if cache_key not in self._separators:
             sep = ASeparator(
                 model_file_dir=str(verified_model.parent),
@@ -91,11 +92,13 @@ class SeparatorService:
         _ = elapsed  # recorded for job metadata by the caller via logs
 
         # Measured: verify each produced file, reporting the real fraction i/n.
+        # Classify all outputs before reporting success. A count of two is
+        # insufficient if both files are labeled Vocals or one is ambiguous.
+        stem_names = match_stems(raw_outputs, requested_stems)
         stems: list[dict[str, Any]] = []
-        total = max(1, len(raw_outputs))
-        for idx, out_path in enumerate(raw_outputs):
+        total = len(raw_outputs)
+        for idx, (out_path, stem_name) in enumerate(zip(raw_outputs, stem_names)):
             name = os.path.basename(out_path)
-            stem_name = self._stem_from_name(name, requested_stems)
             full = os.path.join(output_dir, name)
             on_progress(idx / total, "Verifying outputs")
             try:
@@ -116,20 +119,6 @@ class SeparatorService:
 
         on_progress(1.0, "Completed")
         return stems, model_id, "cpu", False
-
-    @staticmethod
-    def _stem_from_name(name: str, requested: list[str]) -> str:
-        lower = name.lower()
-        for stem in requested:
-            token = f"({stem})"
-            if token.lower() in lower:
-                return stem
-        # Fallback: detect common tokens.
-        if "(vocals)" in lower or "vocal" in lower:
-            return "Vocals"
-        if "(instrumental)" in lower or "instrumental" in lower:
-            return "Instrumental"
-        return requested[0] if requested else "Other"
 
     @staticmethod
     def _cleanup(paths: list[str]) -> None:

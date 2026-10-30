@@ -232,6 +232,16 @@ export function RemoverView() {
                             <p title={result.path} className="w-full truncate text-[11px] text-muted-foreground">
                               {result.path.split(/[\\/]/).pop()}
                             </p>
+                            <audio
+                              controls
+                              preload="none"
+                              className="w-full min-w-0"
+                              aria-label={`Preview ${stem} stem`}
+                              src={`las://renderer/__stem-audio/${encodeURIComponent(completedStems.id)}/${stem}`}
+                              onError={() => setRevealError(`Cannot play the ${stem} stem. Check whether the file still exists and use Show in folder.`)}
+                            >
+                              Your audio player does not support this format.
+                            </audio>
                             <Button type="button" variant="outline" size="sm" className="w-full"
                               onClick={async () => {
                                 setRevealError(null);
