@@ -9,6 +9,7 @@
 import { useState } from "react";
 import { ListChecks, XCircle, Download, Trash2, ChevronDown, ChevronRight } from "lucide-react";
 import { PageHeader } from "@/components/studio/page-header";
+import { PreviousJobsPanel } from "@/components/studio/previous-jobs-panel";
 import { EmptyState } from "@/components/studio/empty-state";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -180,6 +181,7 @@ export function QueueView() {
           )}
         </div>
       )}
+      <PreviousJobsPanel />
     </div>
   );
 }

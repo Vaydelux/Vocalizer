@@ -18,6 +18,9 @@ import * as path from "node:path";
 import * as fs from "node:fs";
 import { pathToFileURL } from "node:url";
 import { registerIpcHandlers, resolveCompletedStemForPlayback } from "./ipc";
+import { cleanupOrphanedRecordings } from "./services/recording-staging";
+import { cleanupInferenceScratch } from "./services/inference-outputs";
+import { shutdownWorkerImmediately } from "./services/inference-worker";
 
 export const isPackaged = app.isPackaged;
 const debugEnabled = process.argv.includes("--vocalizer-debug");
@@ -112,6 +115,7 @@ function createWindow(): void {
     // merely finding Vocalizer.exe is insufficient evidence of a working GUI.
     const failSafe = setTimeout(() => {
       console.error("SMOKE_FAIL: packaged application did not initialize in 60 seconds");
+      shutdownWorkerImmediately();
       app.exit(3);
     }, 60_000);
     mainWindow.webContents.once("did-finish-load", () => {
@@ -119,16 +123,24 @@ function createWindow(): void {
         try {
           const fixture = process.env.VOCALIZER_SMOKE_AUDIO;
           const exportPath = process.env.VOCALIZER_SMOKE_EXPORT;
-          if (!fixture || !exportPath) {
+          const micFixture = process.env.VOCALIZER_SMOKE_RECORDING;
+          const mixPath = process.env.VOCALIZER_SMOKE_MIX;
+          if (!fixture || !exportPath || !micFixture || !mixPath) {
             throw new Error("Windows smoke fixture paths are not configured.");
           }
+          // The microphone fixture is synthetic; passing it through the
+          // renderer validates typed IPC byte transfer and the private staging
+          // bridge without requiring a physical audio device on CI.
+          const recordedBase64 = fs.readFileSync(micFixture).toString("base64");
+          if (recordedBase64.length > 1_000_000) throw new Error("Smoke mic fixture is too large.");
           const result: {
             hasBridge: boolean; hasRenderer: boolean;
             hasFfmpeg: boolean; hasWorker: boolean; nativeAudioVerified: boolean;
+            nativeMicrophoneMixVerified: boolean;
           } = await mainWindow!.webContents.executeJavaScript(`(async () => {
             const bridge = window.studio;
             if (!bridge || bridge.isNative !== true) {
-              return { hasBridge: false, hasRenderer: false, hasFfmpeg: false, hasWorker: false, nativeAudioVerified: false };
+              return { hasBridge: false, hasRenderer: false, hasFfmpeg: false, hasWorker: false, nativeAudioVerified: false, nativeMicrophoneMixVerified: false };
             }
             const system = await bridge.systemInfo();
             const inference = await bridge.inferenceStatus();
@@ -141,6 +153,19 @@ function createWindow(): void {
               startSec: 0, endSec: 0.7
             });
             const output = await bridge.probeMetadata({ path: result.outputPath });
+            // Exercise the same IPC staged-audio path used by Karaoke rather
+            // than passing a synthetic microphone recording as a raw path.
+            const bytes = Uint8Array.from(atob(${JSON.stringify(recordedBase64)}), (char) => char.charCodeAt(0));
+            const staged = await bridge.stageRecording({jobId: "windows-smoke-mix", format:"webm", bytes});
+            const mixed = await bridge.runFfmpeg({
+              kind: "mix", jobId: "windows-smoke-mix",
+              instrumentalPath: fixture, vocalPath: "__recording__",
+              vocalStartSec: 0.3, outputPath: ${JSON.stringify(mixPath)},
+              outputFormat: "wav"
+            });
+            const mixMeta = await bridge.probeMetadata({path: mixed.outputPath});
+            // Main already removed the private temp recording in its finally.
+            const discarded = await bridge.discardRecording({jobId:"windows-smoke-mix"});
             return {
               hasBridge: true,
               hasRenderer: !!document.querySelector("main") && (document.body?.innerText?.length ?? 0) > 100,
@@ -148,18 +173,24 @@ function createWindow(): void {
               hasWorker: inference.workerAvailable === true,
               nativeAudioVerified: source.duration > 1 &&
                 result.verified === true && result.sizeBytes > 0 &&
-                output.duration > 0.5 && output.duration < 1
+                output.duration > 0.5 && output.duration < 1,
+              nativeMicrophoneMixVerified: staged.staged === true && mixed.verified === true &&
+                mixed.sizeBytes > 0 && mixMeta.duration > 1.5 &&
+                discarded.discarded === false
             };
           })()`, true);
-          if (!result.hasBridge || !result.hasRenderer || !result.hasFfmpeg || !result.hasWorker || !result.nativeAudioVerified) {
+          if (!result.hasBridge || !result.hasRenderer || !result.hasFfmpeg || !result.hasWorker ||
+              !result.nativeAudioVerified || !result.nativeMicrophoneMixVerified) {
             throw new Error("Packaged renderer, preload, FFmpeg or worker unavailable: " + JSON.stringify(result));
           }
           console.log("SMOKE_PASS " + JSON.stringify(result));
           clearTimeout(failSafe);
+          shutdownWorkerImmediately();
           app.exit(0);
         } catch (error) {
           console.error("SMOKE_FAIL " + String(error));
           clearTimeout(failSafe);
+          shutdownWorkerImmediately();
           app.exit(4);
         }
       }, 1800);
@@ -187,7 +218,13 @@ if (!app.requestSingleInstanceLock()) {
     }
   });
 
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
+    // Remove files from interrupted microphone recordings before accepting
+    // any new IPC requests; never touch ordinary user audio.
+    try { cleanupInferenceScratch(app.getPath("userData")); }
+    catch (error) { console.error("Cannot clean up stale AI scratch:", error); }
+    try { await cleanupOrphanedRecordings(app.getPath("userData")); }
+    catch (error) { console.error("Cannot clean up stale recording data:", error); }
     debugLog(`Starting Vocalizer (packaged=${app.isPackaged}, resources=${process.resourcesPath})`);
     // Privileged custom protocol: serves bundled static assets under las://renderer/.
     // Next.js static export uses absolute /_next/... URLs; under file:// these
@@ -262,10 +299,11 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 app.on("window-all-closed", () => {
-  // Shut the inference worker down before quitting (no zombie processes).
-  import("./services/inference-worker").then(({ shutdownWorker }) => shutdownWorker());
   if (process.platform !== "darwin") app.quit();
 });
+// The application must terminate the worker before its event loop exits;
+// asynchronous dynamic imports and delayed timeouts are not reliable here.
+app.on("before-quit", () => shutdownWorkerImmediately());
 
 // Harden navigation: only allow loads to the app's own origin (las://) or localhost dev.
 app.on("web-contents-created", (_event, contents) => {

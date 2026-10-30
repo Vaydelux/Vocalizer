@@ -24,6 +24,8 @@ const api: StudioNativeApi = {
   runFfmpeg: (op) => ipcRenderer.invoke(IPC.FFMPEG_RUN, op),
   cancelFfmpeg: (req) => ipcRenderer.invoke(IPC.FFMPEG_CANCEL, req),
   revealFfmpegOutput: (req) => ipcRenderer.invoke(IPC.FFMPEG_REVEAL_OUTPUT, req),
+  stageRecording: (req) => ipcRenderer.invoke(IPC.RECORDING_STAGE, req),
+  discardRecording: (req) => ipcRenderer.invoke(IPC.RECORDING_DISCARD, req),
 
   onFfmpegProgress: (cb) => {
     const handler = (_e: unknown, p: Parameters<typeof cb>[0]) => cb(p);

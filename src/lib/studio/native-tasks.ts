@@ -188,16 +188,44 @@ export async function nativeMixTask(
   const fmt = input.override?.format ?? "wav16";
   const outputPath = await chooseOutputPath(input.instrumental.name + "-mix", fmt);
   ctx.log(`FFmpeg mix → ${outputPath}`);
-  const op: FfmpegOp = {
-    jobId: ctx.jobId,
-    kind: "mix",
-    instrumentalPath: filePath(input.instrumental.file),
-    vocalPath: filePath(input.micFile),
-    vocalStartSec: input.micStartSec,
-    outputFormat: mapFormat(fmt),
-    outputPath,
-  };
-  return await runAndWrap(op, ctx, outputPath);
+  const api = native();
+  if (!api) throw studioError("CAPABILITY_UNAVAILABLE", "Native mixing is unavailable.");
+  let micPath = "";
+  try { micPath = api.getPathForFile(input.micFile); } catch { /* in-memory MediaRecorder file */ }
+  let staged = false;
+  if (!micPath) {
+    const mime = input.micFile.type.toLowerCase();
+    const format = mime.includes("webm") ? "webm" : mime.includes("ogg") ? "ogg" :
+      mime.includes("mp4") || mime.includes("m4a") ? "m4a" : null;
+    if (!format) throw studioError("UNSUPPORTED_MEDIA", "Unsupported microphone recording format.");
+    if (input.micFile.size === 0 || input.micFile.size > 64 * 1024 * 1024) {
+      throw studioError("INPUT_INVALID", "Microphone recording must be under 64 MiB. Save and re-import longer takes.");
+    }
+    if (ctx.signal.aborted) throw studioError("CANCELLED", "Mix cancelled before recording staging.");
+    const bytes = new Uint8Array(await input.micFile.arrayBuffer());
+    await api.stageRecording({ jobId: ctx.jobId, format, bytes });
+    staged = true;
+    micPath = "__recording__";
+  }
+  try {
+    if (ctx.signal.aborted) throw studioError("CANCELLED", "Mix cancelled before encoding.");
+    const op: FfmpegOp = {
+      jobId: ctx.jobId,
+      kind: "mix",
+      instrumentalPath: filePath(input.instrumental.file),
+      vocalPath: micPath,
+      vocalStartSec: input.micStartSec,
+      outputFormat: mapFormat(fmt),
+      outputPath,
+    };
+    return await runAndWrap(op, ctx, outputPath);
+  } finally {
+    if (staged) {
+      await api.discardRecording({ jobId: ctx.jobId }).catch(() => {
+        ctx.log("Temporary recording cleanup deferred until the next launch.");
+      });
+    }
+  }
 }
 
 export { isNative };

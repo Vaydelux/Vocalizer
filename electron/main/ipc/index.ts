@@ -18,6 +18,7 @@ import {
   ffprobeRequestSchema,
   ffmpegOpSchema,
   cancelRequestSchema,
+  recordingStageSchema,
   revealInferenceStemSchema,
   resolvePathRequestSchema,
   nativeSettingsSchema,
@@ -27,6 +28,8 @@ import {
 import { probeFile } from "../services/ffprobe";
 import { runFfmpeg, cancelJob, toMainErrorPayload } from "../services/ffmpeg";
 import { getSettings, setSettings } from "../services/settings";
+import { stageRecordingBytes, discardRecordingFile } from "../services/recording-staging";
+import { inferenceScratchBase, publishInferenceStems } from "../services/inference-outputs";
 import { getFfmpegPath, getFfprobePath, resolvePathKind } from "../services/paths";
 import { studioError } from "../services/errors";
 import {
@@ -102,6 +105,7 @@ async function verifyLocalMdxModel(modelId: string, modelPath: string, architect
 // Only completed, validated inference results may be revealed or played.
 const completedInferenceStems = new Map<string, Map<string, string>>();
 const completedFfmpegOutputs = new Map<string, string>();
+const stagedRecordings = new Map<string, string>();
 const ALLOWED_STEMS = new Set(["Vocals", "Instrumental"]);
 
 /** Playback is restricted to exact paths already verified by the main process.
@@ -169,10 +173,39 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
     return probeFile(req.path);
   });
 
+  /* ---------------------------- recorded audio ----------------------------- */
+  ipcMain.handle(IPC.RECORDING_STAGE, async (event, raw) => {
+    assertSender(event);
+    const req = recordingStageSchema.parse(raw);
+    if (stagedRecordings.has(req.jobId)) {
+      throw studioError("INPUT_INVALID", "A recording is already staged for this job.");
+    }
+    const tempPath = await stageRecordingBytes(app.getPath("userData"), req.jobId, req.format, req.bytes);
+    stagedRecordings.set(req.jobId, tempPath);
+    return { staged: true };
+  });
+
+  ipcMain.handle(IPC.RECORDING_DISCARD, async (event, raw) => {
+    assertSender(event);
+    const req = cancelRequestSchema.parse(raw);
+    const file = stagedRecordings.get(req.jobId);
+    if (!file) return { discarded: false };
+    stagedRecordings.delete(req.jobId);
+    await discardRecordingFile(file);
+    return { discarded: true };
+  });
+
   /* --------------------------------- ffmpeg --------------------------------- */
   ipcMain.handle(IPC.FFMPEG_RUN, async (event, raw) => {
     const sender = assertSender(event);
-    const op = ffmpegOpSchema.parse(raw);
+    const request = ffmpegOpSchema.parse(raw);
+    const stagedFile = request.kind === "mix" && request.vocalPath === "__recording__"
+      ? stagedRecordings.get(request.jobId)
+      : null;
+    if (request.kind === "mix" && request.vocalPath === "__recording__" && !stagedFile) {
+      throw studioError("MISSING_FILE", "The microphone recording is not staged for this job.");
+    }
+    const op = stagedFile && request.kind === "mix" ? { ...request, vocalPath: stagedFile } : request;
     const emit = (p: FfmpegProgress) => {
       if (!sender.isDestroyed()) sender.send(IPC.FFMPEG_PROGRESS, p);
     };
@@ -193,6 +226,13 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
       return result;
     } catch (err) {
       throw toMainErrorPayload(err);
+    } finally {
+      // The native operation has finished. Clear its private source even
+      // if the renderer failed before requesting cleanup.
+      if (stagedFile) {
+        stagedRecordings.delete(request.jobId);
+        await discardRecordingFile(stagedFile);
+      }
     }
   });
 
@@ -249,8 +289,12 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
   ipcMain.handle(IPC.INFERENCE_SEPARATE, async (event, raw) => {
     const sender = assertSender(event);
     const req = inferenceSeparateRequestSchema.parse(raw);
+    let scratch: string | null = null;
     try {
       await verifyLocalMdxModel(req.modelId, req.modelPath, req.architecture);
+      const root = inferenceScratchBase(app.getPath("userData"));
+      await fs.promises.mkdir(root, { recursive: true });
+      scratch = await fs.promises.mkdtemp(path.join(root, "job-"));
       const result = await runSeparation({
         jobId: req.jobId,
         modelId: req.modelId,
@@ -258,7 +302,7 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
         architecture: req.architecture,
         configPath: req.configPath,
         inputPath: req.inputPath,
-        outputDir: req.outputDir,
+        outputDir: scratch,
         requestedStems: req.requestedStems as string[],
         outputFormat: req.outputFormat,
         device: req.device,
@@ -271,7 +315,7 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
       });
       // The worker returns a `result` response; map it to the IPC result shape.
       if (result.type === "result") {
-        const root = await fs.promises.realpath(req.outputDir);
+        const actualScratch = await fs.promises.realpath(scratch);
         const approved = new Map<string, string>();
         const expected = new Set(req.requestedStems);
         if (expected.size !== 2 || !expected.has("Vocals") || !expected.has("Instrumental") ||
@@ -283,7 +327,7 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
             throw studioError("INFERENCE_FAILED", "The worker returned an unexpected or duplicate stem.");
           }
           const resolved = await fs.promises.realpath(item.path);
-          const relative = path.relative(root, resolved);
+          const relative = path.relative(actualScratch, resolved);
           const inside = Boolean(relative) && relative !== ".." &&
             !relative.startsWith(".." + path.sep) && !path.isAbsolute(relative);
           if (!inside || ![".wav", ".flac", ".mp3"].includes(path.extname(resolved).toLowerCase()) ||
@@ -295,14 +339,22 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
         if (approved.size !== expected.size) {
           throw studioError("INFERENCE_FAILED", "The worker did not return one file for each requested stem.");
         }
-        completedInferenceStems.set(req.jobId, approved);
+        // Publish only after both files are verified. The Python worker never
+        // has access to the user-selected destination and cannot erase files
+        // already stored there when it is cancelled.
+        const published = publishInferenceStems(result.stems, actualScratch, req.outputDir, req.jobId);
+        const completed = new Map(published.map(item => [item.stem, item.path]));
+        completedInferenceStems.set(req.jobId, completed);
         if (completedInferenceStems.size > 50) {
           const oldest = completedInferenceStems.keys().next().value;
           if (oldest) completedInferenceStems.delete(oldest);
         }
         const res: InferenceSeparateResult = {
           jobId: req.jobId,
-          stems: result.stems,
+          stems: result.stems.map(item => ({
+            ...item,
+            path: completed.get(item.stem)!,
+          })),
           modelUsed: result.modelUsed,
           deviceUsed: result.deviceUsed,
           fallbackUsed: result.fallbackUsed,
@@ -312,6 +364,12 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
       throw toMainErrorPayload(studioError("INFERENCE_FAILED", "Worker returned an unexpected response."));
     } catch (err) {
       throw toMainErrorPayload(err);
+    } finally {
+      if (scratch) {
+        // Interrupted/failed jobs never leave partial stems in user folders.
+        try { await fs.promises.rm(scratch, { recursive: true, force: true }); }
+        catch (error) { console.error("Could not remove private inference scratch:", error); }
+      }
     }
   });
 

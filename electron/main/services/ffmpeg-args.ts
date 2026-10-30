@@ -122,10 +122,11 @@ function buildConvert(op: Extract<FfmpegOp, { kind: "convert" }>): BuiltCommand 
 function buildMix(op: Extract<FfmpegOp, { kind: "mix" }>): BuiltCommand {
   const enc = encoderArgs(op.outputFormat);
   const ms = Math.round(op.vocalStartSec * 1000);
-  // [0] volume + delay (instrumental); [1] volume (vocal); amix
+  // The instrumental begins at t=0. Only the recorded microphone take is
+  // delayed by vocalStartSec. 'all=1' handles mono and multichannel audio.
   const filter = [
-    `[0]volume=${dbToGain(op.instrumentalGainDb).toFixed(6)},adelay=${ms}|${ms}[i]`,
-    `[1]volume=${dbToGain(op.vocalGainDb).toFixed(6)}[v]`,
+    `[0]volume=${dbToGain(op.instrumentalGainDb).toFixed(6)}[i]`,
+    `[1]volume=${dbToGain(op.vocalGainDb).toFixed(6)},adelay=${ms}:all=1[v]`,
     `[i][v]amix=inputs=2:duration=longest:normalize=0[out]`,
   ].join(";");
   return {

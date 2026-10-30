@@ -52,9 +52,11 @@ export function KaraokeView() {
   const listRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const performanceStartRef = useRef(0);
+  const playbackTimeRef = useRef(0);
   const [fmt, setFmt] = useState<ExportFormatValue>(useExportFormatDefault());
 
   const onTime = useCallback((t: number) => {
+    playbackTimeRef.current = t;
     setCurrentTime(t);
   }, []);
 
@@ -90,6 +92,9 @@ export function KaraokeView() {
 
   const startPerformance = async () => {
     await rec.start();
+    // Capture the real playback position after getUserMedia resolves and the
+    // recording starts, not at Stop (which caused vocal misalignment).
+    performanceStartRef.current = playbackTimeRef.current;
   };
 
   const exportTake = () => {
@@ -100,6 +105,12 @@ export function KaraokeView() {
 
   const exportMix = () => {
     if (!track || !rec.result) return;
+    if (rec.result.blob.size > 64 * 1024 * 1024) {
+      toast.error("This recording is too large for a native mix.", {
+        description: "Export the original take, then re-import and convert it. The in-memory transfer is limited to 64 MiB.",
+      });
+      return;
+    }
     const file = new File([rec.result.blob], rec.result.name, { type: rec.result.mime });
     const job = enqueue(
       "export",
@@ -255,10 +266,7 @@ export function KaraokeView() {
                   <Button
                     variant="destructive"
                     className="gap-1.5"
-                    onClick={() => {
-                      performanceStartRef.current = currentTime;
-                      rec.stop();
-                    }}
+                    onClick={() => rec.stop()}
                   >
                     <Square className="h-4 w-4" aria-hidden /> Stop take
                   </Button>
