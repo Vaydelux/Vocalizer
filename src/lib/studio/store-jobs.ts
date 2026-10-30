@@ -206,7 +206,7 @@ export const useJobs = create<JobStore>((set, get) => ({
     tasks.delete(id);
     set((s) => ({
       jobs: s.jobs.filter((j) => {
-        if (j.id === id && j.result?.url) URL.revokeObjectURL(j.result.url);
+        if (j.id === id && j.result?.url.startsWith("blob:")) URL.revokeObjectURL(j.result.url);
         return j.id !== id;
       }),
     }));

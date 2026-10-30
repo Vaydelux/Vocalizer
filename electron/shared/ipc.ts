@@ -24,6 +24,7 @@ export const IPC = {
   FFMPEG_RUN: "ffmpeg:run",
   FFMPEG_CANCEL: "ffmpeg:cancel",
   FFMPEG_PROGRESS: "ffmpeg:progress",
+  FFMPEG_REVEAL_OUTPUT: "ffmpeg:revealOutput",
   SETTINGS_GET: "settings:get",
   SETTINGS_SET: "settings:set",
   SYSTEM_INFO: "system:info",
@@ -259,6 +260,7 @@ export interface StudioNativeApi {
   probeMetadata(req: { path: string }): Promise<NativeAudioMeta>;
   runFfmpeg(op: FfmpegOp): Promise<FfmpegResult>;
   cancelFfmpeg(req: CancelRequest): Promise<{ cancelled: boolean }>;
+  revealFfmpegOutput(req: { jobId: string }): Promise<{ revealed: boolean }>;
   onFfmpegProgress(cb: (p: FfmpegProgress) => void): () => void;
   // Inference (AI separation) — honestly unavailable until a worker is bundled.
   inferenceStatus(): Promise<InferenceStatus>;

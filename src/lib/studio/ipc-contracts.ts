@@ -138,6 +138,7 @@ export interface StudioNativeApi {
   probeMetadata(req: { path: string }): Promise<NativeAudioMeta>;
   runFfmpeg(op: FfmpegOp): Promise<FfmpegResult>;
   cancelFfmpeg(req: CancelRequest): Promise<{ cancelled: boolean }>;
+  revealFfmpegOutput(req: { jobId: string }): Promise<{ revealed: boolean }>;
   onFfmpegProgress(cb: (p: FfmpegProgress) => void): () => void;
   // Inference (AI separation) — honestly unavailable until a worker is bundled.
   inferenceStatus(): Promise<InferenceStatus>;

@@ -74,7 +74,8 @@ async function runAndWrap(op: FfmpegOp, ctx: JobCtx, outputPath: string): Promis
     return {
       name: result.outputPath.split(/[\\/]/).pop() ?? "output",
       size: result.sizeBytes,
-      url: result.outputPath, // absolute disk path; the queue shows "Reveal" natively
+      url: result.outputPath, // absolute disk path; never pass to an HTML download anchor
+      nativePath: true,
       mime: op.outputFormat === "mp3" ? "audio/mpeg" : op.outputFormat === "flac" ? "audio/flac" : "audio/wav",
     };
   } finally {

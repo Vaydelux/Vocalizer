@@ -85,6 +85,7 @@ async function verifyLocalMdxModel(modelId: string, modelPath: string, architect
 
 // Only completed, validated inference results may be revealed or played.
 const completedInferenceStems = new Map<string, Map<string, string>>();
+const completedFfmpegOutputs = new Map<string, string>();
 const ALLOWED_STEMS = new Set(["Vocals", "Instrumental"]);
 
 /** Playback is restricted to exact paths already verified by the main process.
@@ -159,7 +160,20 @@ export function registerIpcHandlers(_getMainWindow: () => BrowserWindow | null):
       if (!sender.isDestroyed()) sender.send(IPC.FFMPEG_PROGRESS, p);
     };
     try {
-      return await runFfmpeg(op, emit);
+      const result = await runFfmpeg(op, emit);
+      if (!result.verified) {
+        throw studioError("ENCODE_FAILED", "FFmpeg output has not been verified.");
+      }
+      const outputPath = await fs.promises.realpath(result.outputPath);
+      if (!(await fs.promises.stat(outputPath)).isFile()) {
+        throw studioError("OUTPUT_EMPTY", "FFmpeg output is no longer a valid file.");
+      }
+      completedFfmpegOutputs.set(op.jobId, outputPath);
+      if (completedFfmpegOutputs.size > 50) {
+        const oldest = completedFfmpegOutputs.keys().next().value;
+        if (oldest) completedFfmpegOutputs.delete(oldest);
+      }
+      return result;
     } catch (err) {
       throw toMainErrorPayload(err);
     }
@@ -169,6 +183,23 @@ export function registerIpcHandlers(_getMainWindow: () => BrowserWindow | null):
     assertSender(event);
     const req = cancelRequestSchema.parse(raw);
     return { cancelled: cancelJob(req.jobId) };
+  });
+
+  ipcMain.handle(IPC.FFMPEG_REVEAL_OUTPUT, async (event, raw) => {
+    assertSender(event);
+    const req = cancelRequestSchema.parse(raw);
+    const registered = completedFfmpegOutputs.get(req.jobId);
+    if (!registered) throw studioError("PERMISSION_DENIED", "No verified export is registered for this job.");
+    try {
+      const real = await fs.promises.realpath(registered);
+      if (real !== registered || !(await fs.promises.stat(real)).isFile()) {
+        throw new Error("Export is missing or moved.");
+      }
+      shell.showItemInFolder(real);
+      return { revealed: true };
+    } catch {
+      throw studioError("MISSING_FILE", "The completed export no longer exists on disk.");
+    }
   });
 
   /* --------------------------------- settings ------------------------------- */
