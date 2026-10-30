@@ -123,6 +123,9 @@ export function makeInferenceTask(req: SeparationRequest): JobTask {
         size: blob.size,
         url: URL.createObjectURL(blob),
         mime: "application/json",
+        stemFiles: result.stems,
+        modelUsed: result.modelUsed,
+        deviceUsed: result.deviceUsed,
       };
     } catch (err) {
       throw toStudioError(err);

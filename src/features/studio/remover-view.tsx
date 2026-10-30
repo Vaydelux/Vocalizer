@@ -37,6 +37,8 @@ export function RemoverView() {
   const exportFormat = useSettings((s) => s.exportFormat);
   const mp3Bitrate = useSettings((s) => s.mp3Bitrate);
   const enqueue = useJobs((s) => s.enqueue);
+  const completedStems = useJobs((s) => s.jobs.filter((j) => j.state === "completed" && j.result?.stemFiles?.length).slice(-1)[0]);
+  const [revealError, setRevealError] = useState<string | null>(null);
   const [localModelPath, setLocalModelPath] = useState<string | null>(null);
   const [workerAvailable, setWorkerAvailable] = useState(false);
   const [localModelError, setLocalModelError] = useState<string | null>(null);
@@ -168,17 +170,39 @@ export function RemoverView() {
               </CardHeader>
               <CardContent>
                 <div className="grid grid-cols-2 gap-3">
-                  {["Vocals", "Instrumental"].map((slot) => (
-                    <div
-                      key={slot}
-                      className="flex flex-col items-center justify-center rounded-lg border border-dashed border-border px-3 py-8 text-center"
-                    >
-                      <FileAudio2 className="mb-1.5 h-5 w-5 text-muted-foreground/50" aria-hidden />
-                      <p className="text-xs font-medium text-muted-foreground">{slot}</p>
-                      <p className="mt-0.5 text-[11px] text-muted-foreground/60">Empty — no result</p>
-                    </div>
-                  ))}
+                  {(["Vocals", "Instrumental"] as const).map((slot) => {
+                    const output = completedStems?.result?.stemFiles?.find((f) => f.stem === slot);
+                    return (
+                      <div key={slot} className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border px-3 py-6 text-center">
+                        <FileAudio2 className="h-5 w-5 text-muted-foreground/50" aria-hidden />
+                        <p className="text-xs font-medium">{slot}</p>
+                        {output ? (
+                          <>
+                            <p className="w-full truncate text-[11px] text-muted-foreground" title={output.path}>
+                              {output.path.split(/[\\/]/).pop()}
+                            </p>
+                            <Button type="button" size="sm" variant="outline" onClick={async () => {
+                              setRevealError(null);
+                              try {
+                                await native()?.revealInferenceStem({ jobId: completedStems.id, stem: slot });
+                              } catch (err) {
+                                setRevealError(err instanceof Error ? err.message : "Cannot reveal the stem.");
+                              }
+                            }}>
+                              Show in folder
+                            </Button>
+                          </>
+                        ) : <p className="mt-0.5 text-[11px] text-muted-foreground/60">Empty — no result</p>}
+                      </div>
+                    );
+                  })}
                 </div>
+                {completedStems?.result?.modelUsed ? (
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    Last completed: {completedStems.result.modelUsed} · {completedStems.result.deviceUsed}
+                  </p>
+                ) : null}
+                {revealError ? <p className="mt-2 text-xs text-destructive" role="alert">{revealError}</p> : null}
                 <Button
                   className="mt-3 w-full gap-1.5"
                   disabled={!track || !localModelPath || !workerAvailable}

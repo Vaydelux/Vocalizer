@@ -65,6 +65,10 @@ export interface JobResultFile {
   /** Object URL of the finalized output (web preview). The desktop build writes to disk instead. */
   url: string;
   mime: string;
+  /** Native AI stems, shown after the worker returns verified paths. */
+  stemFiles?: { stem: ModelStem; path: string }[];
+  modelUsed?: string;
+  deviceUsed?: "cpu" | "cuda" | "directml";
 }
 
 export interface Job {

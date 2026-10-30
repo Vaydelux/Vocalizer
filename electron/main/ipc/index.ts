@@ -4,7 +4,7 @@
  * payload shape; `shell: false` is enforced everywhere a process is spawned.
  */
 
-import { app, BrowserWindow, dialog, ipcMain, type IpcMainInvokeEvent, type WebContents } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, shell, type IpcMainInvokeEvent, type WebContents } from "electron";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import * as path from "node:path";
@@ -18,6 +18,7 @@ import {
   ffprobeRequestSchema,
   ffmpegOpSchema,
   cancelRequestSchema,
+  revealInferenceStemSchema,
   resolvePathRequestSchema,
   nativeSettingsSchema,
   type FfmpegProgress,
@@ -82,6 +83,8 @@ async function verifyLocalMdxModel(modelId: string, modelPath: string, architect
   }
 }
 
+// Only completed, validated inference results may be revealed via IPC.
+const completedInferenceStems = new Map<string, Map<string, string>>();
 export function registerIpcHandlers(_getMainWindow: () => BrowserWindow | null): void {
   /* --------------------------------- dialogs -------------------------------- */
   ipcMain.handle(IPC.DIALOG_OPEN_FILES, async (event, raw) => {
@@ -202,6 +205,24 @@ export function registerIpcHandlers(_getMainWindow: () => BrowserWindow | null):
       });
       // The worker returns a `result` response; map it to the IPC result shape.
       if (result.type === "result") {
+        const root = await fs.promises.realpath(req.outputDir);
+        const approved = new Map<string, string>();
+        for (const item of result.stems) {
+          const resolved = await fs.promises.realpath(item.path);
+          const relative = path.relative(root, resolved);
+          const inside = Boolean(relative) && relative !== ".." &&
+            !relative.startsWith(".." + path.sep) && !path.isAbsolute(relative);
+          if (!inside || ![".wav", ".flac", ".mp3"].includes(path.extname(resolved).toLowerCase()) ||
+              !(await fs.promises.stat(resolved)).isFile()) {
+            throw studioError("INFERENCE_FAILED", "Inference returned an output outside the approved folder or with an invalid format.");
+          }
+          approved.set(item.stem, resolved);
+        }
+        completedInferenceStems.set(req.jobId, approved);
+        if (completedInferenceStems.size > 50) {
+          const oldest = completedInferenceStems.keys().next().value;
+          if (oldest) completedInferenceStems.delete(oldest);
+        }
         const res: InferenceSeparateResult = {
           jobId: req.jobId,
           stems: result.stems,
@@ -221,6 +242,20 @@ export function registerIpcHandlers(_getMainWindow: () => BrowserWindow | null):
     assertSender(event);
     const req = cancelRequestSchema.parse(raw ?? {});
     return { cancelled: cancelSeparation(req.jobId) };
+  });
+
+  ipcMain.handle(IPC.INFERENCE_REVEAL_STEM, async (event, raw) => {
+    assertSender(event);
+    const req = revealInferenceStemSchema.parse(raw);
+    const approved = completedInferenceStems.get(req.jobId)?.get(req.stem);
+    if (!approved) throw studioError("PERMISSION_DENIED", "No completed stem exists for this job.");
+    const real = await fs.promises.realpath(approved);
+    const stat = await fs.promises.stat(real);
+    if (real !== approved || !stat.isFile()) {
+      throw studioError("PERMISSION_DENIED", "The verified output file is no longer available.");
+    }
+    shell.showItemInFolder(real);
+    return { revealed: true };
   });
 
   /* --------------------------------- system --------------------------------- */

@@ -32,6 +32,7 @@ export const IPC = {
   INFERENCE_SEPARATE: "inference:separate",
   INFERENCE_CANCEL: "inference:cancel",
   INFERENCE_PROGRESS: "inference:progress",
+  INFERENCE_REVEAL_STEM: "inference:revealStem",
 } as const;
 
 export type IpcChannel = (typeof IPC)[keyof typeof IPC];
@@ -156,6 +157,11 @@ export type CancelRequest = z.infer<typeof cancelRequestSchema>;
 /* ------------------------------- inference --------------------------------- */
 
 export const inferenceStatusSchema = z.object({}).optional();
+/** Only reveal stems from a completed job recorded by the privileged main process. */
+export const revealInferenceStemSchema = z.object({
+  jobId: z.string().min(1).max(80),
+  stem: z.enum(["Vocals", "Instrumental", "Drums", "Bass", "Guitar", "Piano", "Other"]),
+});
 export interface InferenceStatus {
   workerAvailable: boolean;
   runtimes: string[];
@@ -258,6 +264,7 @@ export interface StudioNativeApi {
   inferenceStatus(): Promise<InferenceStatus>;
   runInference(req: InferenceSeparateRequest): Promise<InferenceSeparateResult>;
   cancelInference(req: { jobId: string }): Promise<{ cancelled: boolean }>;
+  revealInferenceStem(req: { jobId: string; stem: InferenceStemResult["stem"] }): Promise<{ revealed: boolean }>;
   onInferenceProgress(cb: (p: InferenceProgress) => void): () => void;
   getSettings(): Promise<NativeSettings>;
   setSettings(patch: Partial<NativeSettings>): Promise<NativeSettings>;
