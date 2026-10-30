@@ -63,14 +63,23 @@ echo '{"type":"init","protocolVersion":1}' | python3 inference/worker/main.py
 # 3. Real separation through the protocol
 printf '%s\n%s\n%s\n' \
   '{"type":"init","protocolVersion":1}' \
-  '{"type":"separate","requestId":"r1","modelId":"UVR-MDX-NET-Inst_HQ_5.onnx","modelPath":"UVR-MDX-NET-Inst_HQ_5.onnx","architecture":"mdx-net","inputPath":"/path/to/song.wav","outputDir":"/path/to/out","requestedStems":["Vocals","Instrumental"],"outputFormat":"wav","device":"cpu"}' \
+  '{"type":"separate","requestId":"r1","modelId":"UVR-MDX-NET-Inst_HQ_5.onnx","modelPath":"/absolute/path/to/UVR-MDX-NET-Inst_HQ_5.onnx","architecture":"mdx-net","inputPath":"/path/to/song.wav","outputDir":"/path/to/out","requestedStems":["Vocals","Instrumental"],"outputFormat":"wav","device":"cpu"}' \
   '{"type":"shutdown"}' \
   | python3 inference/worker/main.py
 ```
 
-The model downloads automatically on first use (~59 MB) from the public UVR
-model repo. Output files are FFprobe-verified by the worker before the `result`
-message is emitted.
+**Local-only preview behavior:** Vocalizer now requires an existing, lawfully
+obtained copy of `UVR-MDX-NET-Inst_HQ_5.onnx` (59,074,342 bytes, SHA-256
+`811cb24095d865763752310848b7ec86aeede0626cb05749ab35350e46897000`).
+The Electron Remover page offers a native ONNX file picker. The main process
+and Python worker verify the exact model before running; missing or corrupted
+files fail rather than requesting a download. The local checkpoint is only a
+testing option until the model's redistribution permissions are confirmed.
+
+The standalone protocol request must provide an **absolute local modelPath**;
+a model filename alone no longer activates a download. Outputs are checked
+with FFprobe before the result message is emitted. Offline execution has not
+yet passed a Windows installed-app acceptance test.
 
 ## Protocol
 
