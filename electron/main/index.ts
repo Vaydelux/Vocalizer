@@ -17,7 +17,7 @@ import { app, BrowserWindow, shell, Menu, protocol, net } from "electron";
 import * as path from "node:path";
 import * as fs from "node:fs";
 import { pathToFileURL } from "node:url";
-import { registerIpcHandlers } from "./ipc";
+import { registerIpcHandlers, resolveCompletedStemForPlayback } from "./ipc";
 
 export const isPackaged = app.isPackaged;
 const debugEnabled = process.argv.includes("--vocalizer-debug");
@@ -128,7 +128,7 @@ if (!app.requestSingleInstanceLock()) {
     // Next.js static export uses absolute /_next/... URLs; under file:// these
     // resolve to the filesystem root and 404. The las:// scheme maps every
     // request to a real file in the renderer directory, with traversal rejected.
-    protocol.handle("las", (request) => {
+    protocol.handle("las", async (request) => {
       let relativePath: string;
       try {
         const url = new URL(request.url);
@@ -138,6 +138,23 @@ if (!app.requestSingleInstanceLock()) {
         relativePath = decodeURIComponent(url.pathname).replace(/^\/+/, "");
       } catch {
         return new Response("Bad request", { status: 400 });
+      }
+      // Separate, strictly allowlisted media namespace. Never resolve a
+      // renderer-provided file path; the approved pathname lives in main IPC.
+      if (relativePath.startsWith("__stem-audio/")) {
+        const parts = relativePath.split("/");
+        if (parts.length !== 3 ||
+            !/^[a-zA-Z0-9_-]{1,80}$/.test(parts[1]) ||
+            !["Vocals", "Instrumental"].includes(parts[2])) {
+          return new Response("Not found", { status: 404 });
+        }
+        const media = await resolveCompletedStemForPlayback(parts[1], parts[2]);
+        if (!media) return new Response("Not found", { status: 404 });
+        // Retain byte-range requests for long audio tracks and seeking.
+        const headers = new Headers();
+        const range = request.headers.get("range");
+        if (range) headers.set("range", range);
+        return net.fetch(pathToFileURL(media).href, { headers });
       }
       // Check path components rather than a raw startsWith(base) prefix:
       // C:\\app\\out-evil is NOT inside C:\\app\\out.
