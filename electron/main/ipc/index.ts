@@ -416,7 +416,12 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
         completedInferenceStems.set(req.jobId, completed);
         if (completedInferenceStems.size > 50) {
           const oldest = completedInferenceStems.keys().next().value;
-          if (oldest) completedInferenceStems.delete(oldest);
+          if (oldest) {
+            for (const stem of completedInferenceStems.get(oldest)?.keys() ?? []) {
+              relinkedStemStats.delete(`${oldest}:${stem}`);
+            }
+            completedInferenceStems.delete(oldest);
+          }
         }
         const res: InferenceSeparateResult = {
           jobId: req.jobId,
