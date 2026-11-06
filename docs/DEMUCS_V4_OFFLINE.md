@@ -98,3 +98,21 @@ sample-accurate length as the input (within FFprobe reporting tolerance).
 The 3-second test protects single-window behavior and the 9-second test
 protects crossfade continuity. This is a structural test only: perceptual seam
 quality, SDR/SI-SDR and hour-long operation still require real-song testing.
+
+
+## CPU and memory acceptance measurements
+
+Windows PR validation additionally runs a **26-second** synthetic test, forcing
+multiple bounded Low Memory windows. The artifact named
+\`demucs-cpu-metrics-<git-sha>\` contains a JSON report with measured wall
+time, realtime factor, summed parent/child CPU seconds, sampled peak
+worker-tree RSS and measured maximum adjacent sample steps around each
+crossfade boundary. The official checkpoint is fetched into the private CI
+runner and is not included in the report or release ZIP.
+
+The sampled RSS sum can double-count shared DLL pages and does not represent
+unique private memory. A short synthetic audio fixture does **not** establish
+that a 30-minute song is safe on low-memory PCs, or prove SI-SDR, subjective
+seam quality or clean-machine compatibility. Never use these measurements
+as a universal hardware claim. Extended music/format acceptance and
+licensing checks remain release prerequisites.
