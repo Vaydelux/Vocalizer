@@ -1,52 +1,69 @@
 import { describe, expect, it } from "bun:test";
-import type { Job } from "../../src/lib/studio/types";
 import {
-  finishStemRoute,
-  hasRoutedStemJob,
-  reserveStemRoute,
-  shouldAutoRouteStemJob,
+  finishStemRoute, hasRoutedStemJob, markAutoStemAttempt,
+  pendingStemNames, reserveStemRoute, shouldAutoRouteStemJob,
 } from "../../src/lib/studio/stem-routing";
+import type { ModelStem } from "../../src/lib/studio/types";
 
+const stems: ModelStem[] = ["Vocals", "Drums", "Bass", "Other"];
 const completed = (id: string, trackId = "track-1") => ({
-  id,
-  state: "completed" as const,
+  id, state: "completed" as const,
   result: {
     name: "stems.json", url: "blob:fixture", size: 1, mime: "application/json",
     sourceTrackId: trackId,
-    stemFiles: [{ stem: "Vocals" as const, path: "fixture.wav" }],
+    stemFiles: stems.map((stem) => ({stem, path: "fixture.wav"})),
   },
 });
 
-describe("DAW stem routing ledger", () => {
-  it("prevents concurrent or repeated routing of a completed job", () => {
-    const id = "stem-job-1";
+describe("per-stem mixer routing", () => {
+  it("prevents concurrent imports and duplicate lanes", () => {
+    const id = "routing-test-full";
     expect(reserveStemRoute(id)).toBe(true);
     expect(reserveStemRoute(id)).toBe(false);
-    finishStemRoute(id, true);
-    expect(hasRoutedStemJob(id)).toBe(true);
-    expect(reserveStemRoute(id)).toBe(false);
+    finishStemRoute(id, stems);
+    expect(hasRoutedStemJob(id, stems)).toBe(true);
+    expect(pendingStemNames(id, stems)).toEqual([]);
   });
 
-  it("allows retry of a job that imported no stems", () => {
-    const id = "stem-job-retry";
+  it("allows retry only for stems that failed", () => {
+    const id = "routing-test-partial";
     expect(reserveStemRoute(id)).toBe(true);
-    finishStemRoute(id, false);
-    expect(hasRoutedStemJob(id)).toBe(false);
+    finishStemRoute(id, ["Vocals", "Other"]);
+    expect(hasRoutedStemJob(id, stems)).toBe(false);
+    expect(pendingStemNames(id, stems)).toEqual(["Drums", "Bass"]);
     expect(reserveStemRoute(id)).toBe(true);
-    finishStemRoute(id, true);
+    finishStemRoute(id, ["Drums", "Bass"]);
+    expect(hasRoutedStemJob(id, stems)).toBe(true);
+    expect(pendingStemNames(id, stems)).toEqual([]);
   });
 
-  it("routes only the latest completed job on the selected source", () => {
-    const job = completed("stem-job-auto");
+  it("retries when no stems were imported", () => {
+    const id = "routing-test-empty";
+    expect(reserveStemRoute(id)).toBe(true);
+    finishStemRoute(id, []);
+    expect(pendingStemNames(id, stems)).toEqual(stems);
+    expect(reserveStemRoute(id)).toBe(true);
+    finishStemRoute(id, ["Vocals"]);
+  });
+
+  it("limits automatic attempts to once per job; manual retry stays available", () => {
+    const job = completed("routing-test-auto");
     expect(shouldAutoRouteStemJob(true, job.id, "track-1", job)).toBe(true);
+    expect(markAutoStemAttempt(job.id)).toBe(true);
+    expect(markAutoStemAttempt(job.id)).toBe(false);
+    expect(shouldAutoRouteStemJob(true, job.id, "track-1", job)).toBe(false);
+    expect(reserveStemRoute(job.id)).toBe(true);
+    finishStemRoute(job.id, ["Vocals"]);
+    expect(pendingStemNames(job.id, stems)).toEqual(["Drums", "Bass", "Other"]);
+    expect(shouldAutoRouteStemJob(true, job.id, "track-1", job)).toBe(false);
+  });
+
+  it("rejects mismatched jobs, tracks and incomplete operations", () => {
+    const job = completed("routing-test-mismatch");
     expect(shouldAutoRouteStemJob(false, job.id, "track-1", job)).toBe(false);
     expect(shouldAutoRouteStemJob(true, "old-job", "track-1", job)).toBe(false);
-    expect(shouldAutoRouteStemJob(true, job.id, "another-track", job)).toBe(false);
-    expect(shouldAutoRouteStemJob(true, job.id, "track-1", { ...job, state: "running" })).toBe(false);
-    expect(shouldAutoRouteStemJob(true, job.id, "track-1", { ...job, result: null })).toBe(false);
-    expect(reserveStemRoute(job.id)).toBe(true);
-    expect(shouldAutoRouteStemJob(true, job.id, "track-1", job)).toBe(false);
-    finishStemRoute(job.id, true);
-    expect(shouldAutoRouteStemJob(true, job.id, "track-1", job)).toBe(false);
+    expect(shouldAutoRouteStemJob(true, job.id, "different", job)).toBe(false);
+    expect(shouldAutoRouteStemJob(true, job.id, "track-1", {...job, state:"running"})).toBe(false);
+    expect(shouldAutoRouteStemJob(true, job.id, "track-1", {...job, result:null})).toBe(false);
   });
 });

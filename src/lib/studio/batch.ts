@@ -10,11 +10,15 @@
 import { z } from "zod";
 import { create } from "zustand";
 import { toast } from "sonner";
-import type { ExportFormat, Mp3Bitrate, SampleRatePref, JobResultFile } from "./types";
+
 import { getTrackById, useTracks } from "./store-tracks";
 import { useJobs } from "./store-jobs";
 import { makeConvertTask } from "./tasks";
 import { sanitizeFileName } from "./format";
+import { BatchJobRegistry } from "./batch-cancellation";
+
+// Registry lifetimes follow their associated batch AbortControllers.
+const batchRegistries = new WeakMap<AbortController, BatchJobRegistry>();
 
 /* ------------------------------- Zod Schemas ------------------------------- */
 
@@ -133,42 +137,46 @@ export const useBatch = create<BatchStore>((set, get) => ({
     const { items, recipe, isRunning } = get();
     if (isRunning) return;
 
-    const pending = items.filter((i) => i.status === "pending" || i.status === "error");
+    const pending = items.filter((i) => i.status === "pending" || i.status === "error" || i.status === "cancelled");
     if (pending.length === 0) {
       toast.info("No pending tracks to process");
       return;
     }
 
     const abortController = new AbortController();
+    const run = new BatchJobRegistry((id) => useJobs.getState().cancel(id));
+    batchRegistries.set(abortController, run);
+    abortController.signal.addEventListener("abort", () => run.cancel(), { once: true });
     set({ isRunning: true, abortController });
 
-    const jobsEnqueue = useJobs.getState().enqueue;
+    const enqueueJob = useJobs.getState().enqueue;
     let completedCount = 0;
     let errorCount = 0;
+    let cancelledCount = 0;
 
     toast.info(`Starting batch of ${pending.length} tracks (concurrency: ${recipe.concurrency})`);
 
-    // Worker pool for concurrency
     const queue = [...pending];
-    const runWorker = async () => {
+    const processNext = async () => {
       while (queue.length > 0 && !abortController.signal.aborted) {
         const item = queue.shift();
         if (!item) break;
-
         const track = getTrackById(item.trackId);
-        if (!track) {
-          set((s) => ({
-            items: s.items.map((i) => (i.id === item.id ? { ...i, status: "error", error: "Track not found" } : i)),
+        if (!track || track.status !== "ready" || track.file.size === 0) {
+          set((state) => ({
+            items: state.items.map((i) => i.id === item.id
+              ? { ...i, status: "error", error: "Source audio is missing or not ready." } : i),
           }));
           errorCount++;
           continue;
         }
 
-        // Mark processing
-        set((s) => ({
-          items: s.items.map((i) => (i.id === item.id ? { ...i, status: "processing", progress: 0.05 } : i)),
+        set((state) => ({
+          items: state.items.map((i) => i.id === item.id
+            ? { ...i, status: "processing", stage: "Queued", progress: 0, error: undefined } : i),
         }));
 
+        let jobId: string | null = null;
         try {
           const outputName = applyNamingPattern(track.name, recipe.namingPattern);
           const sampleRate = recipe.sampleRatePref === "auto" ? null : recipe.sampleRatePref;
@@ -180,88 +188,110 @@ export const useBatch = create<BatchStore>((set, get) => ({
             mp3Bitrate: recipe.mp3Bitrate,
             loudnessNormalize: recipe.loudnessNormalize ?? undefined,
           });
+          jobId = enqueueJob("convert", `Batch: ${outputName}`, task);
+          run.track(jobId);
 
-          // Enqueue in global processing queue
-          const jobId = jobsEnqueue(
-            "convert",
-            `Batch: ${outputName}`,
-            task
-          );
-
-          // Track completion via job poll / listener
-          await new Promise<void>((resolve, reject) => {
-            const unsub = useJobs.subscribe((state) => {
+          // Subscribe and immediately inspect current state. A fast job can
+          // settle between enqueue and subscription, otherwise leaving a
+          // promise pending forever.
+          await new Promise<void>((resolve) => {
+            let settled = false;
+            const complete = (state: ReturnType<typeof useJobs.getState>) => {
+              if (settled) return;
               const job = state.jobs.find((j) => j.id === jobId);
               if (!job) return;
-
-              if (job.state === "running") {
-                set((s) => ({
-                  items: s.items.map((i) =>
-                    i.id === item.id ? { ...i, progress: job.progress ?? 0, stage: job.stage ?? undefined } : i
-                  ),
+              if (job.state === "running" || job.state === "preparing") {
+                set((current) => ({
+                  items: current.items.map((i) => i.id === item.id
+                    ? { ...i, progress: job.progress ?? 0, stage: job.stage ?? undefined } : i),
                 }));
-              } else if (job.state === "completed") {
-                unsub();
-                set((s) => ({
-                  items: s.items.map((i) =>
-                    i.id === item.id
-                      ? {
-                          ...i,
-                          status: "done",
-                          progress: 1.0,
-                          outputName: job.result?.name,
-                          outputUrl: job.result?.url,
-                        }
-                      : i
-                  ),
-                }));
-                completedCount++;
-                resolve();
-              } else if (job.state === "failed") {
-                unsub();
-                set((s) => ({
-                  items: s.items.map((i) =>
-                    i.id === item.id
-                      ? { ...i, status: "error", error: job.error?.message ?? "Transcoding failed" }
-                      : i
-                  ),
-                }));
-                errorCount++;
-                reject(new Error(job.error?.message ?? "Transcoding failed"));
-              } else if (job.state === "cancelled") {
-                unsub();
-                set((s) => ({
-                  items: s.items.map((i) => (i.id === item.id ? { ...i, status: "cancelled" } : i)),
-                }));
-                resolve();
+                return;
               }
-            });
+              if (job.state === "cancelling") {
+                set((current) => ({
+                  items: current.items.map((i) => i.id === item.id
+                    ? { ...i, stage: "Cancelling…" } : i),
+                }));
+                return;
+              }
+              if (job.state !== "completed" && job.state !== "failed" && job.state !== "cancelled") {
+                return;
+              }
+              settled = true;
+              unsub();
+              if (job.state === "completed") {
+                completedCount++;
+                set((current) => ({
+                  items: current.items.map((i) => i.id === item.id
+                    ? {
+                        ...i, status: "done", progress: 1, stage: "Completed",
+                        outputName: job.result?.name, outputUrl: job.result?.url,
+                      } : i),
+                }));
+              } else if (job.state === "failed") {
+                errorCount++;
+                set((current) => ({
+                  items: current.items.map((i) => i.id === item.id
+                    ? { ...i, status: "error", stage: "Failed",
+                        error: job.error?.message ?? "Transcoding failed" } : i),
+                }));
+              } else {
+                cancelledCount++;
+                set((current) => ({
+                  items: current.items.map((i) => i.id === item.id
+                    ? { ...i, status: "cancelled", stage: "Cancelled" } : i),
+                }));
+              }
+              resolve();
+            };
+            const unsub = useJobs.subscribe(complete);
+            complete(useJobs.getState());
           });
-        } catch (err) {
-          // Error captured in job subscription
+        } catch (error) {
+          errorCount++;
+          set((state) => ({
+            items: state.items.map((i) => i.id === item.id
+              ? { ...i, status: "error", stage: "Failed",
+                  error: error instanceof Error ? error.message : "Could not enqueue batch job." } : i),
+          }));
+        } finally {
+          if (jobId) run.finish(jobId);
         }
       }
     };
 
-    const workers = Array.from({ length: recipe.concurrency }, () => runWorker());
-    await Promise.all(workers);
-
-    set({ isRunning: false, abortController: null });
-    toast.success("Batch processing finished", {
-      description: `Completed: ${completedCount} | Errors: ${errorCount}`,
-    });
+    try {
+      await Promise.all(Array.from({ length: recipe.concurrency }, () => processNext()));
+    } finally {
+      // Do not allow another batch to start before native cancellation and
+      // worker finalization have actually settled.
+      batchRegistries.delete(abortController);
+      if (get().abortController === abortController) {
+        set({ isRunning: false, abortController: null });
+      }
+      if (abortController.signal.aborted) {
+        toast.info("Batch cancellation completed", {
+          description: `Completed: ${completedCount} | Cancelled: ${cancelledCount} | Errors: ${errorCount}`,
+        });
+      } else {
+        toast.success("Batch processing finished", {
+          description: `Completed: ${completedCount} | Errors: ${errorCount}`,
+        });
+      }
+    }
   },
 
   cancelBatch: () => {
     const { abortController } = get();
-    if (abortController) {
-      abortController.abort();
-    }
-    set({
-      isRunning: false,
-      abortController: null,
-      items: get().items.map((i) => (i.status === "processing" ? { ...i, status: "cancelled" } : i)),
-    });
-    toast.info("Batch processing cancelled");
+    if (!abortController || abortController.signal.aborted) return;
+    // Propagate cancellation to every queued/running global job owned by this
+    // batch. Do not mark the batch finished until those jobs settle.
+    abortController.abort();
+    batchRegistries.get(abortController)?.cancel();
+    set((state) => ({
+      items: state.items.map((i) => i.status === "processing"
+        ? { ...i, stage: "Cancelling…" } : i),
+    }));
+    toast.info("Cancelling batch jobs", { description: "Waiting for active processing to stop." });
   },
 }));
