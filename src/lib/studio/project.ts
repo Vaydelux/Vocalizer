@@ -39,11 +39,11 @@ export const projectTrackMetaSchema = z.object({
 });
 
 export const projectTrackSchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  size: z.number(),
-  mime: z.string(),
-  addedAt: z.number(),
+  id: z.string().min(1).max(128),
+  name: z.string().min(1).max(255),
+  size: z.number().int().min(0).max(100 * 1024 * 1024 * 1024),
+  mime: z.string().max(128),
+  addedAt: z.number().finite().nonnegative(),
   nativePath: z.string().optional(),
   meta: projectTrackMetaSchema.nullable(),
 });
@@ -101,7 +101,7 @@ export const projectSchema = z.object({
   createdAt: z.string(),
   updatedAt: z.string(),
   appVersion: z.string().default("0.3.0"),
-  tracks: z.array(projectTrackSchema),
+  tracks: z.array(projectTrackSchema).max(128),
   analysis: projectAnalysisSchema,
   mixer: projectMixerSchema,
   ui: z.object({
@@ -316,6 +316,9 @@ export async function hydrateProject(project: VocalizerProject): Promise<void> {
     activeView: targetView,
     preselectedTrackId: project.ui.preselectedTrackId || null,
   });
+  // Restoring saved state is not a user modification, even when UI autosave
+  // subscribers observe individual store updates during hydration.
+  useProject.setState({ isDirty: false, lastSavedAt: Date.now() });
 }
 
 /**
@@ -405,6 +408,9 @@ export async function saveProjectFile(): Promise<void> {
 
 export async function loadProjectFromFile(file: File): Promise<void> {
   try {
+    if (file.size > 5 * 1024 * 1024) {
+      throw studioError("CORRUPT_FILE", "Project metadata exceeds the 5 MiB safety limit.");
+    }
     const raw = await file.text();
     const project = parseProjectJson(raw);
     await hydrateProject(project);
