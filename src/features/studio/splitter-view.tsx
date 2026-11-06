@@ -253,7 +253,7 @@ export function SplitterView() {
           }
           const extension = item.path.toLowerCase().endsWith(".flac") ? "flac"
             : item.path.toLowerCase().endsWith(".mp3") ? "mp3" : "wav";
-          const sourceName = track.name.replace(/\\.[^/.]+$/, "");
+          const sourceName = track.name.replace(/\.[^/.]+$/, "");
           const displayName = `${sourceName}_${stemName}.${extension}`;
           // Register a verified file-backed source, not a copy of audio bytes.
           const createdId = await useTracks.getState().addNativeStem(jobId, stemName, displayName);
