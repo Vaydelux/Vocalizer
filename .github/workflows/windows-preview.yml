@@ -123,20 +123,32 @@ jobs:
       - name: Verify actual offline HTDemucs four-stem inference on Windows
         if: ${{ github.event_name == 'pull_request' }}
         shell: pwsh
-        timeout-minutes: 25
+        timeout-minutes: 30
         run: |
           # Official checkpoint is downloaded to the ephemeral CI temp folder,
           # hash-checked and never included in the downloadable Vocalizer ZIP.
           $ErrorActionPreference = "Stop"
+          # CI-only process sampler. This is installed after PyInstaller
+          # packages the runtime and is not included in the app ZIP.
+          python -m pip install psutil==7.0.0 --disable-pip-version-check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $model = Join-Path $env:RUNNER_TEMP "955717e8-8726e21a.th"
           Invoke-WebRequest "https://dl.fbaipublicfiles.com/demucs/hybrid_transformer/955717e8-8726e21a.th" -OutFile $model
           $digest = (Get-FileHash $model -Algorithm SHA256).Hash.ToLowerInvariant()
           if ($digest -ne "8726e21a993978c7ba086d3872e7608d7d5bfca646ca4aca459ffda844faa8b4") {
             throw "HTDemucs test checkpoint checksum mismatch"
           }
-          python scripts/smoke-demucs.py --exe inference-dist/windows-x64/inference-worker.exe --model $model --ffmpeg resources/binaries/ffmpeg.exe --ffprobe resources/binaries/ffprobe.exe
+          python scripts/smoke-demucs.py --exe inference-dist/windows-x64/inference-worker.exe --model $model --ffmpeg resources/binaries/ffmpeg.exe --ffprobe resources/binaries/ffprobe.exe --metrics-output (Join-Path $env:RUNNER_TEMP "vocalizer-demucs-perf.json")
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Remove-Item -LiteralPath $model -Force
+      - name: Upload CPU and memory acceptance measurements
+        if: ${{ github.event_name == 'pull_request' && success() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: demucs-cpu-metrics-${{ github.sha }}
+          path: ${{ runner.temp }}/vocalizer-demucs-perf.json
+          retention-days: 14
+          if-no-files-found: error
       - name: Prepare preview icon
         run: python scripts/create-preview-icon.py
       - name: Record stable UTC build date
