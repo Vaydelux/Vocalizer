@@ -1,18 +1,18 @@
 /**
- * Decoder allocation policy for the waveform UI. A 1 GiB PCM stem can easily
- * expand to multiple GiB in decodeAudioData; large and disk-backed tracks
- * must use the media element for playback without computing in-memory peaks.
+ * Full decoded waveforms are optional. For large audio or uncertain metadata,
+ * use the streaming media element rather than materializing an entire PCM copy.
  */
-import { MAX_DECODE_BYTES } from "./decode";
+import { mayDecodeBrowserAudio } from "./decode-budget";
 
 export interface WaveformSource {
   file: { size: number };
+  meta?: { duration: number } | null;
   nativeStem?: unknown;
 }
 
 export function mayComputeFullWaveform(source: WaveformSource): boolean {
-  return !source.nativeStem && source.file.size > 0 &&
-    source.file.size <= MAX_DECODE_BYTES;
+  return !source.nativeStem &&
+    mayDecodeBrowserAudio(source.file.size, source.meta?.duration ?? null);
 }
 
 export function shouldPreloadMetadataOnly(source: WaveformSource): boolean {
