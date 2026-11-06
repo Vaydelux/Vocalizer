@@ -161,3 +161,27 @@ GitHub draft tag: debug-YYYY-MM-DD
 As of **2026-10-30**, source validation and the latest successfully validated commit can be checked in [GitHub Actions](https://github.com/Vaydelux/Vocalizer/actions). CI includes synthetic native audio processing but not real microphone or full clean-Windows acceptance. The model license gate remains open. Do not call this a fully bundled offline AI product or a production-approved public release.
 
 **Next action for you:** Read [Quick Help](QUICK_HELP.md), download the latest successful `main` debug ZIP, run `Run-Vocalizer-Debug.cmd`, and complete Sections **1**, **2**, and **6** with sanitized bug evidence. The development toolchain is optional.
+
+## Browser preview audio memory guardrail
+
+The browser-only Web Audio path now measures media duration before full
+`decodeAudioData` processing. A compressed file can be small but expand into
+hundreds of megabytes or gigabytes of float32 PCM.
+
+- Full browser decoding is limited to at most **64 MiB of compressed input**,
+  **10 minutes of measured duration**, and a **256 MiB projected PCM budget**
+  (assuming 48 kHz, four channels, float32). The actual PCM check may reject
+  recordings shorter than ten minutes.
+- Longer or larger files can still be imported for honest duration-only
+  metadata and media-element playback when the browser supports the format.
+  Browser processing jobs requiring full PCM decode reject over-budget sources
+  with a controlled `FILE_TOO_LARGE` error.
+- The waveform player skips full PCM peak calculation on over-budget media.
+  No false waveform is generated; the source remains seekable via the media
+  element when supported.
+- **Native Electron** still performs supported Cutter/Joiner/Mixer/Converter
+  operations using validated FFmpeg file paths and file-backed AI stems.
+  The browser limit is not a native file-size limit.
+- This is a conservative resource guardrail, not a guaranteed bound for every
+  codec/channel layout or browser implementation. Record real process memory
+  usage on target hardware before release.
