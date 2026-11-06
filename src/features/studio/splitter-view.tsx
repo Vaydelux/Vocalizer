@@ -64,8 +64,8 @@ const MODEL_PRESETS: ModelPreset[] = [
     name: "Demucs v4 (Hybrid HTDemucs 4-Stem)",
     architecture: "demucs",
     defaultStems: ["Vocals", "Drums", "Bass", "Other"],
-    description: "Industry-standard 4-stem separation with dedicated drums and bass isolation.",
-    defaultFile: "htdemucs.th",
+    description: "Offline four-stem CPU separation using the approved SHA-256-verified HTDemucs v4 checkpoint.",
+    defaultFile: "955717e8-8726e21a.th",
   },
   {
     id: "bs-roformer",
@@ -168,7 +168,8 @@ export function SplitterView() {
   }, [refreshRuntime]);
 
   const toggleStem = (stem: ModelStem) => {
-    if (selectedPreset.architecture === "mdx-net") return;
+    // The worker requires the complete set for each architecture.
+    if (selectedPreset.architecture === "mdx-net" || selectedPreset.architecture === "demucs") return;
     if (selectedStems.includes(stem)) {
       if (selectedStems.length > 1) {
         setSelectedStems(selectedStems.filter((s) => s !== stem));
@@ -188,6 +189,10 @@ export function SplitterView() {
         filters: [{ name: "Neural Checkpoints", extensions: ["onnx", "ckpt", "pt", "th"] }],
       });
       if (!files?.length) return;
+      if (files[0].split(/[\\/]/).pop() !== selectedPreset.defaultFile) {
+        setModelError(`Expected the approved checkpoint: ${selectedPreset.defaultFile}`);
+        return;
+      }
       setLocalModelPath(files[0]);
     } catch (err) {
       setModelError(err instanceof Error ? err.message : "Failed to open file picker.");
@@ -196,12 +201,12 @@ export function SplitterView() {
 
   function startSeparation() {
     if (!track || !workerDetected || activeInference) return;
-    if (selectedPreset.architecture !== "mdx-net") {
+    if (selectedPreset.architecture === "bs-roformer") {
       toast.error("This separation architecture is not enabled in the current CPU worker.");
       return;
     }
     if (!localModelPath) {
-      setModelError("Select a verified local MDX-Net checkpoint. No models are bundled.");
+      setModelError("Select the approved local checkpoint. Models are never bundled or downloaded.");
       return;
     }
     const modelPath = localModelPath;
@@ -270,7 +275,7 @@ export function SplitterView() {
     <div className="space-y-5">
       <PageHeader
         title="Stem Splitter"
-        description="Local MDX-Net vocal/instrumental separation. Four-stem engines are planned but not available in this build."
+        description="Offline two-stem MDX-Net or four-stem HTDemucs CPU processing with separately selected and integrity-checked local checkpoints."
         actions={
           <div className="flex items-center gap-2">
             <Button
@@ -364,7 +369,7 @@ export function SplitterView() {
                     </SelectTrigger>
                     <SelectContent>
                       {MODEL_PRESETS.map((preset) => (
-                        <SelectItem key={preset.id} value={preset.id} disabled={preset.architecture !== "mdx-net"} className="text-xs">
+                        <SelectItem key={preset.id} value={preset.id} disabled={preset.architecture === "bs-roformer"} className="text-xs">
                           {preset.name}
                         </SelectItem>
                       ))}
@@ -385,10 +390,10 @@ export function SplitterView() {
                         variant="ghost"
                         size="sm"
                         className="h-6 text-[10px] px-1.5"
-                        onClick={() => setSelectedStems(["Vocals", "Instrumental"])}
-                        disabled
+                        onClick={() => setSelectedStems(["Vocals", "Drums", "Bass", "Other"])}
+                        disabled={selectedPreset.architecture !== "demucs"}
                       >
-                        All 4 (planned)
+                        All 4
                       </Button>
                       <Button
                         type="button"
@@ -396,6 +401,7 @@ export function SplitterView() {
                         size="sm"
                         className="h-6 text-[10px] px-1.5"
                         onClick={() => setSelectedStems(["Vocals", "Instrumental"])}
+                        disabled={selectedPreset.architecture !== "mdx-net"}
                       >
                         Vocal+Inst
                       </Button>
@@ -425,7 +431,7 @@ export function SplitterView() {
                           }`}
                         >
                           <Checkbox
-                            disabled={selectedPreset.architecture === "mdx-net"}
+                            disabled
                             checked={checked}
                             onCheckedChange={() => toggleStem(stem)}
                           />
@@ -458,7 +464,7 @@ export function SplitterView() {
                     </div>
                   ) : (
                     <p className="text-[11px] text-muted-foreground">
-                      No model is bundled. Select the checksum-verified local MDX-Net checkpoint.
+                      No model is bundled. Select <code className="text-[10px]">{selectedPreset.defaultFile}</code> from local storage.
                     </p>
                   )}
                   {modelError && <p className="text-xs text-destructive">{modelError}</p>}
@@ -593,7 +599,7 @@ export function SplitterView() {
                     type="button"
                     className="w-full h-10 gap-2 font-medium"
                     onClick={startSeparation}
-                    disabled={!workerDetected || Boolean(activeInference) || checkingRuntime || selectedStems.length !== 2 || !localModelPath || selectedPreset.architecture !== "mdx-net"}
+                    disabled={!workerDetected || Boolean(activeInference) || checkingRuntime || selectedStems.length !== selectedPreset.defaultStems.length || !localModelPath || selectedPreset.architecture === "bs-roformer"}
                   >
                     {activeInference ? (
                       <>

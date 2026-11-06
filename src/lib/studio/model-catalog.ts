@@ -13,7 +13,7 @@ export interface CatalogModel {
   id: string;
   displayName: string;
   architecture: "mdx-net" | "demucs" | "bs-roformer" | "melband-roformer" | "vr-arch" | "mdxc";
-  format: ".onnx" | ".ckpt" | ".pth" | ".pt" | ".safetensors";
+  format: ".onnx" | ".ckpt" | ".pth" | ".pt" | ".th" | ".safetensors";
   supportedStems: string[];
   /** Approximate download size, bytes (may vary by source). */
   approxSizeBytes: number;
@@ -57,13 +57,13 @@ export const MODEL_CATALOG: CatalogModel[] = [
     id: "htdemucs-4s",
     displayName: "HTDemucs v4 (4-stem)",
     architecture: "demucs",
-    format: ".ckpt",
+    format: ".th",
     supportedStems: ["Vocals", "Drums", "Bass", "Other"],
     approxSizeBytes: 80 * 1024 * 1024,
-    sourceUrl: "https://dl.fbaipublicfiles.com/demucs/hybrid_transformer/f7e0c425-b9c47387.th",
-    expectedSha256: null,
+    sourceUrl: "https://dl.fbaipublicfiles.com/demucs/hybrid_transformer/955717e8-8726e21a.th",
+    expectedSha256: "8726e21a993978c7ba086d3872e7608d7d5bfca646ca4aca459ffda844faa8b4",
     requiredRuntime: "pytorch-cpu",
-    supportedDevices: ["cpu", "cuda"],
+    supportedDevices: ["cpu"],
     license: "MIT (Demucs)",
     licenseUrl: "https://github.com/facebookresearch/demucs",
     redistribution: "unverified",
