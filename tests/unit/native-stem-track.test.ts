@@ -1,5 +1,5 @@
 import { describe, expect, it, afterEach } from "bun:test";
-import { audioMetaFromNativeProbe, hasUsableTrackAudio } from "../../src/lib/studio/native-stem-track";
+import { audioMetaFromNativeProbe, hasUsableTrackAudio, stemFilenameFromPublishedPath } from "../../src/lib/studio/native-stem-track";
 import { useTracks } from "../../src/lib/studio/store-tracks";
 import type { StudioNativeApi, NativeAudioMeta } from "../../src/lib/studio/ipc-contracts";
 
@@ -17,6 +17,15 @@ describe("native disk-backed stem tracks", () => {
   afterEach(() => {
     useTracks.getState().clearAll();
     Reflect.deleteProperty(globalThis, "window");
+  });
+
+  it("uses the published file basename so project relinking finds the original stem", () => {
+    expect(stemFilenameFromPublishedPath("C:\\\\Users\\\\Music\\\\Vocalizer-job-12-drums.wav"))
+      .toBe("Vocalizer-job-12-drums.wav");
+    expect(stemFilenameFromPublishedPath("/tmp/output/Vocalizer-job-12-vocals.flac"))
+      .toBe("Vocalizer-job-12-vocals.flac");
+    expect(() => stemFilenameFromPublishedPath("C:\\\\Music\\\\not-audio.exe")).toThrow();
+    expect(() => stemFilenameFromPublishedPath("/tmp/output/")).toThrow();
   });
 
   it("uses measured duration, rate and channel count without fabricating decoded samples", () => {

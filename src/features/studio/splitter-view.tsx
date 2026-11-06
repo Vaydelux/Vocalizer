@@ -39,6 +39,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useTracks } from "@/lib/studio/store-tracks";
+import { stemFilenameFromPublishedPath } from "@/lib/studio/native-stem-track";
 import { useUi } from "@/lib/studio/store-ui";
 import { useSettings } from "@/lib/studio/store-settings";
 import { useMixer } from "@/lib/studio/store-mixer";
@@ -251,10 +252,7 @@ export function SplitterView() {
           if (!isNative()) {
             throw new Error("File-backed stem mixer import requires the native application.");
           }
-          const extension = item.path.toLowerCase().endsWith(".flac") ? "flac"
-            : item.path.toLowerCase().endsWith(".mp3") ? "mp3" : "wav";
-          const sourceName = track.name.replace(/\.[^/.]+$/, "");
-          const displayName = `${sourceName}_${stemName}.${extension}`;
+          const displayName = stemFilenameFromPublishedPath(item.path);
           // Register a verified file-backed source, not a copy of audio bytes.
           const createdId = await useTracks.getState().addNativeStem(jobId, stemName, displayName);
           if (!useMixer.getState().lanes.some((lane) => lane.trackId === createdId)) {
