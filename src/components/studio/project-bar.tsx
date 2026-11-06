@@ -21,10 +21,13 @@ import {
   saveAutosaveSession,
   restoreAutosaveSession,
   relinkProjectTracks,
+  relinkProjectNativeStems,
 } from "@/lib/studio/project";
 import { useMixer } from "@/lib/studio/store-mixer";
 import { useAnalysis } from "@/lib/studio/store-analysis";
 import { useTracks } from "@/lib/studio/store-tracks";
+import { isNative } from "@/lib/studio/native";
+import { parsePublishedStemFilename } from "../../../electron/shared/published-stem";
 import { CommandPalette } from "./command-palette";
 import { ComplianceModal } from "./compliance-modal";
 
@@ -133,6 +136,41 @@ export function ProjectBar() {
       .finally(() => setIsRelinking(false));
   };
 
+  const handleRelinkClick = () => {
+    if (isRelinking) return;
+    const nativeStemsPending = isNative() && tracks.some(
+      (track) => track.status === "error" && track.file.size === 0 &&
+        parsePublishedStemFilename(track.name) !== null
+    );
+    // Keep the existing browser-file relink for non-published source audio.
+    if (!nativeStemsPending) {
+      relinkInputRef.current?.click();
+      return;
+    }
+    setIsRelinking(true);
+    void relinkProjectNativeStems()
+      .then(({ linked, unresolved, rejected, cancelled }) => {
+        if (cancelled) return;
+        if (linked > 0) {
+          toast.success(`Relinked ${linked} saved stem(s) without copying audio into RAM`, {
+            description: unresolved
+              ? `${unresolved} original(s) still missing. Relink remaining files to finish recovery.`
+              : "All project audio is now available.",
+          });
+        } else {
+          toast.warning("No matching published stems were restored", {
+            description: rejected
+              ? `${rejected} selected file(s) failed name, size, duration or source checks.`
+              : "Select the exact original Vocalizer output files for this project.",
+          });
+        }
+      })
+      .catch((error) => toast.error("Native stem relink failed", {
+        description: error instanceof Error ? error.message : "Unable to validate selected saved stems.",
+      }))
+      .finally(() => setIsRelinking(false));
+  };
+
   return (
     <div className="flex h-12 w-full shrink-0 items-center justify-between border-b border-border bg-card/50 px-3 text-sm">
       {/* Hidden file input for opening projects */}
@@ -226,7 +264,7 @@ export function ProjectBar() {
             variant="outline"
             className="h-7 gap-1 px-2 text-xs text-amber-600 dark:text-amber-400"
             disabled={isRelinking}
-            onClick={() => relinkInputRef.current?.click()}
+            onClick={handleRelinkClick}
             title={`${missingTrackCount} original audio file(s) must be relinked before processing`}
           >
             <Link2 className="h-3.5 w-3.5" />

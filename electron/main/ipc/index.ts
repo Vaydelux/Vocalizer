@@ -20,6 +20,7 @@ import {
   cancelRequestSchema,
   recordingStageSchema,
   revealInferenceStemSchema,
+  nativeStemRelinkRequestSchema,
   resolvePathRequestSchema,
   nativeSettingsSchema,
   type FfmpegProgress,
@@ -28,6 +29,7 @@ import {
 } from "../../shared/ipc";
 import { probeFile } from "../services/ffprobe";
 import { parseNativeStemInput } from "../../shared/stem-input";
+import { parsePublishedStemFilename, doesRelinkedStemMatch } from "../../shared/published-stem";
 import { runFfmpeg, cancelJob, toMainErrorPayload } from "../services/ffmpeg";
 import { getSettings, setSettings } from "../services/settings";
 import { stageRecordingBytes, discardRecordingFile } from "../services/recording-staging";
@@ -113,6 +115,9 @@ async function verifyLocalModel(modelId: string, modelPath: string, architecture
 
 // Only completed, validated inference results may be revealed or played.
 const completedInferenceStems = new Map<string, Map<string, string>>();
+// Pin the identity of user-relinked audio. An on-disk replacement must not
+// silently become a different source after the user verified the original.
+const relinkedStemStats = new Map<string, { dev: number; ino: number; size: number; mtimeMs: number }>();
 const completedFfmpegOutputs = new Map<string, string>();
 const stagedRecordings = new Map<string, string>();
 const ALLOWED_STEMS = new Set(["Vocals", "Instrumental", "Drums", "Bass", "Guitar", "Piano", "Other"]);
@@ -127,6 +132,9 @@ export async function resolveCompletedStemForPlayback(jobId: string, stem: strin
     const real = await fs.promises.realpath(registered);
     const stat = await fs.promises.stat(real);
     if (real !== registered || !stat.isFile()) return null;
+    const pinned = relinkedStemStats.get(`${jobId}:${stem}`);
+    if (pinned && (stat.dev !== pinned.dev || stat.ino !== pinned.ino ||
+        stat.size !== pinned.size || stat.mtimeMs !== pinned.mtimeMs)) return null;
     if (![".wav", ".flac", ".mp3"].includes(path.extname(real).toLowerCase())) return null;
     return real;
   } catch {
@@ -402,10 +410,18 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
         // already stored there when it is cancelled.
         const published = publishInferenceStems(result.stems, actualScratch, req.outputDir, req.jobId);
         const completed = new Map(published.map(item => [item.stem, item.path]));
+        // A fresh inference result takes precedence over any prior user-relinked
+        // session registration with the same job token.
+        for (const stem of completed.keys()) relinkedStemStats.delete(`${req.jobId}:${stem}`);
         completedInferenceStems.set(req.jobId, completed);
         if (completedInferenceStems.size > 50) {
           const oldest = completedInferenceStems.keys().next().value;
-          if (oldest) completedInferenceStems.delete(oldest);
+          if (oldest) {
+            for (const stem of completedInferenceStems.get(oldest)?.keys() ?? []) {
+              relinkedStemStats.delete(`${oldest}:${stem}`);
+            }
+            completedInferenceStems.delete(oldest);
+          }
         }
         const res: InferenceSeparateResult = {
           jobId: req.jobId,
@@ -448,6 +464,89 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
       throw studioError("DECODE_FAILED", "Native stem metadata could not be verified.");
     }
     return metadata;
+  });
+
+  /** Select on disk through an operating-system dialog; never accept paths
+   * from project JSON or renderer IPC. Large files stay file-backed. */
+  ipcMain.handle(IPC.INFERENCE_RELINK_STEMS, async (event, raw) => {
+    assertSender(event);
+    const req = nativeStemRelinkRequestSchema.parse(raw);
+    const wanted = new Map<string, typeof req.expected>();
+    for (const item of req.expected) {
+      if (!parsePublishedStemFilename(item.name)) continue;
+      const entries = wanted.get(item.name) ?? [];
+      entries.push(item);
+      wanted.set(item.name, entries);
+    }
+    if (!wanted.size) {
+      return { cancelled: false, rejected: 0, files: [] };
+    }
+    const selected = await dialog.showOpenDialog({
+      title: "Relink saved Vocalizer stems",
+      properties: ["openFile", "multiSelections"],
+      filters: [{ name: "Published stems", extensions: ["wav", "flac", "mp3"] }],
+    });
+    if (selected.canceled || !selected.filePaths.length) {
+      return { cancelled: true, rejected: 0, files: [] };
+    }
+    if (selected.filePaths.length > 128) {
+      throw studioError("INPUT_INVALID", "Choose at most 128 saved stems per relink operation.");
+    }
+
+    const files: Array<{
+      name: string;
+      jobId: string;
+      stem: "Vocals" | "Instrumental" | "Drums" | "Bass" | "Guitar" | "Piano" | "Other";
+      meta: Awaited<ReturnType<typeof probeFile>>;
+    }> = [];
+    let rejected = 0;
+    for (const chosenPath of selected.filePaths) {
+      const name = path.basename(chosenPath);
+      const ref = parsePublishedStemFilename(name);
+      const candidates = wanted.get(name);
+      if (!ref || !candidates || candidates.length !== 1) { rejected++; continue; }
+      try {
+        const before = await fs.promises.lstat(chosenPath);
+        if (!before.isFile() || before.isSymbolicLink() || before.size <= 0) {
+          rejected++; continue;
+        }
+        const real = await fs.promises.realpath(chosenPath);
+        const meta = await probeFile(real);
+        const after = await fs.promises.lstat(chosenPath);
+        if (!after.isFile() || after.isSymbolicLink() ||
+            before.dev !== after.dev || before.ino !== after.ino ||
+            before.size !== after.size || before.mtimeMs !== after.mtimeMs ||
+            meta.sizeBytes !== after.size || !meta.sampleRate || !meta.channels ||
+            !doesRelinkedStemMatch(candidates[0], {
+              name, size: meta.sizeBytes, duration: meta.duration,
+            })) { rejected++; continue; }
+        const existing = completedInferenceStems.get(ref.jobId)?.get(ref.stem);
+        if (existing && existing !== real &&
+            await resolveCompletedStemForPlayback(ref.jobId, ref.stem)) {
+          rejected++; continue;
+        }
+        const job = completedInferenceStems.get(ref.jobId) ?? new Map<string, string>();
+        job.set(ref.stem, real);
+        completedInferenceStems.delete(ref.jobId);
+        completedInferenceStems.set(ref.jobId, job);
+        relinkedStemStats.set(`${ref.jobId}:${ref.stem}`, {
+          dev: after.dev, ino: after.ino, size: after.size, mtimeMs: after.mtimeMs,
+        });
+        files.push({ name, jobId: ref.jobId, stem: ref.stem, meta });
+      } catch {
+        // An unreadable or corrupted selected file must not unblock mixdown.
+        rejected++;
+      }
+    }
+    while (completedInferenceStems.size > 50) {
+      const oldest = completedInferenceStems.keys().next().value;
+      if (!oldest) break;
+      for (const stem of completedInferenceStems.get(oldest)?.keys() ?? []) {
+        relinkedStemStats.delete(`${oldest}:${stem}`);
+      }
+      completedInferenceStems.delete(oldest);
+    }
+    return { cancelled: false, rejected, files };
   });
 
   ipcMain.handle(IPC.INFERENCE_REVEAL_STEM, async (event, raw) => {

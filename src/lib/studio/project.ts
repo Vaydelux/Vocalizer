@@ -21,6 +21,9 @@ import { useUi, type ViewId } from "./store-ui";
 import { isNative, native } from "./native";
 import { studioError } from "./errors";
 import { sanitizeFileName } from "./format";
+import { audioMetaFromNativeProbe } from "./native-stem-track";
+import { nativeStemPlaybackUrl } from "../../../electron/shared/stem-input";
+import { parsePublishedStemFilename, doesRelinkedStemMatch } from "../../../electron/shared/published-stem";
 import type { AudioTrack } from "./types";
 
 export const PROJECT_SCHEMA_VERSION = 2;
@@ -161,25 +164,17 @@ export function serializeProject(): VocalizerProject {
   const u = useUi.getState();
   const mixer = useMixer.getState();
 
-  const tracks: ProjectTrack[] = t.tracks.map((track) => {
-    let nativePath: string | undefined = undefined;
-    if (isNative()) {
-      try {
-        nativePath = native()?.getPathForFile(track.file) || undefined;
-      } catch {
-        // Ignored
-      }
-    }
-    return {
-      id: track.id,
-      name: track.name,
-      size: track.size,
-      mime: track.mime,
-      addedAt: track.addedAt,
-      nativePath,
-      meta: track.meta,
-    };
-  });
+  // v2 project files contain only safe metadata. Native filesystem paths are
+  // neither trusted for relinking nor useful after restart; omit them to avoid
+  // exposing the user's local directory names when projects are shared.
+  const tracks: ProjectTrack[] = t.tracks.map((track) => ({
+    id: track.id,
+    name: track.name,
+    size: track.size,
+    mime: track.mime,
+    addedAt: track.addedAt,
+    meta: track.meta,
+  }));
 
   return {
     schema: PROJECT_MAGIC_SCHEMA,
@@ -319,6 +314,77 @@ export async function hydrateProject(project: VocalizerProject): Promise<void> {
   // Restoring saved state is not a user modification, even when UI autosave
   // subscribers observe individual store updates during hydration.
   useProject.setState({ isDirty: false, lastSavedAt: Date.now() });
+}
+
+/**
+ * Relink published AI stems through a main-owned OS picker. Only small
+ * metadata crosses IPC; saved audio bytes are never copied into renderer RAM.
+ * Normal user imports continue to use the browser File relink path below.
+ */
+export async function relinkProjectNativeStems(): Promise<{
+  linked: number; unresolved: number; rejected: number; cancelled: boolean;
+}> {
+  const api = native();
+  if (!isNative() || !api) {
+    throw studioError("CAPABILITY_UNAVAILABLE", "Native stem recovery requires the desktop application.");
+  }
+  const projectId = useProject.getState().projectId;
+  const missing = useTracks.getState().tracks.filter(
+    (track) => track.status === "error" && track.file.size === 0 && track.size > 0
+  );
+  const expected = missing
+    .filter((track) => parsePublishedStemFilename(track.name) !== null)
+    .map((track) => ({ name: track.name, size: track.size, duration: track.meta?.duration ?? null }));
+  if (!expected.length) return { linked: 0, unresolved: missing.length, rejected: 0, cancelled: false };
+
+  const response = await api.relinkInferenceStems({ expected });
+  if (response.cancelled || useProject.getState().projectId !== projectId) {
+    return {
+      linked: 0, unresolved: useTracks.getState().tracks.filter(
+        (track) => track.status === "error" && track.file.size === 0
+      ).length,
+      rejected: response.rejected, cancelled: true,
+    };
+  }
+
+  let linked = 0;
+  let rejected = response.rejected;
+  for (const entry of response.files) {
+    const matches = useTracks.getState().tracks.filter(
+      (track) => track.status === "error" && track.file.size === 0 &&
+        track.name === entry.name && track.size === entry.meta.sizeBytes
+    );
+    if (matches.length !== 1) { rejected++; continue; }
+    const track = matches[0];
+    const ref = parsePublishedStemFilename(entry.name);
+    if (!ref || entry.jobId !== ref.jobId || entry.stem !== ref.stem ||
+        !doesRelinkedStemMatch({
+          name: track.name, size: track.size, duration: track.meta?.duration ?? null,
+        }, {
+          name: entry.name, size: entry.meta.sizeBytes, duration: entry.meta.duration,
+        })) { rejected++; continue; }
+
+    try {
+      const meta = audioMetaFromNativeProbe(entry.meta);
+      const url = nativeStemPlaybackUrl(ref);
+      // Native source is a zero-byte sentinel; its size remains metadata only.
+      // The original track ID stays unchanged, preserving all mixer lane links.
+      useTracks.setState((state) => ({
+        tracks: state.tracks.map((item) => item.id === track.id &&
+          item.status === "error" && item.file.size === 0
+          ? { ...item, nativeStem: ref, url, meta, status: "ready",
+              error: undefined } : item),
+      }));
+      linked++;
+    } catch {
+      rejected++;
+    }
+  }
+  if (linked > 0) useProject.getState().markDirty();
+  const unresolved = useTracks.getState().tracks.filter(
+    (track) => track.status === "error" && track.file.size === 0
+  ).length;
+  return { linked, unresolved, rejected, cancelled: false };
 }
 
 /**

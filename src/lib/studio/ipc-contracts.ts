@@ -140,6 +140,20 @@ export interface InferenceProgress {
   stage: string;
 }
 
+export interface NativeStemRelinkRequest {
+  expected: Array<{ name: string; size: number; duration: number | null }>;
+}
+export interface NativeStemRelinkResponse {
+  cancelled: boolean;
+  rejected: number;
+  files: Array<{
+    name: string;
+    jobId: string;
+    stem: InferenceStemResult["stem"];
+    meta: NativeAudioMeta;
+  }>;
+}
+
 export interface StudioNativeApi {
   isNative: true;
   /** Resolve the real filesystem path of a renderer File selection (Electron webUtils). */
@@ -172,6 +186,7 @@ export interface StudioNativeApi {
   cancelInference(req: { jobId: string }): Promise<{ cancelled: boolean }>;
   revealInferenceStem(req: { jobId: string; stem: InferenceStemResult["stem"] }): Promise<{ revealed: boolean }>;
   probeInferenceStem(req: { jobId: string; stem: InferenceStemResult["stem"] }): Promise<NativeAudioMeta>;
+  relinkInferenceStems(req: NativeStemRelinkRequest): Promise<NativeStemRelinkResponse>;
   onInferenceProgress(cb: (p: InferenceProgress) => void): () => void;
   getSettings(): Promise<NativeSettings>;
   setSettings(patch: Partial<NativeSettings>): Promise<NativeSettings>;
