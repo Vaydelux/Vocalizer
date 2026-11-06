@@ -44,3 +44,32 @@ def require_local_mdx_model(
     if digest.hexdigest().lower() != expected_sha256.lower():
         raise WorkerError("model-corrupted", "Model SHA-256 does not match the verified checkpoint.")
     return candidate.resolve()
+
+# Pinned official HTDemucs v4 single-model checkpoint. Model weights are never
+# redistributed or downloaded by Vocalizer during an inference request.
+DEMUCS_FILENAME = "955717e8-8726e21a.th"
+DEMUCS_SIGNATURE = "955717e8"
+DEMUCS_SHA256 = "8726e21a993978c7ba086d3872e7608d7d5bfca646ca4aca459ffda844faa8b4"
+
+
+def require_local_demucs_model(
+    model_id: str, model_path: str, expected_sha256: str = DEMUCS_SHA256,
+) -> Path:
+    """Verify exact upstream checkpoint before deserializing PyTorch .th data."""
+    if model_id != DEMUCS_FILENAME:
+        raise WorkerError("architecture-unsupported", "Only hash-pinned HTDemucs v4 is enabled.")
+    candidate = Path(model_path)
+    if not candidate.is_absolute() or candidate.name != DEMUCS_FILENAME:
+        raise WorkerError("model-not-found", "Select the local HTDemucs checkpoint by its exact filename.")
+    if not candidate.is_file() or candidate.is_symlink():
+        raise WorkerError("model-not-found", "HTDemucs checkpoint missing or linked; downloads are disabled.")
+    digest = sha256()
+    try:
+        with candidate.open("rb") as stream:
+            for block in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(block)
+    except OSError as exc:
+        raise WorkerError("model-not-found", f"Cannot read checkpoint: {exc}") from exc
+    if digest.hexdigest() != expected_sha256:
+        raise WorkerError("model-corrupted", "HTDemucs checkpoint SHA-256 failed verification.")
+    return candidate.resolve()

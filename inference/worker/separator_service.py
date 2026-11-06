@@ -10,8 +10,6 @@ import os
 import time
 from typing import Any
 
-from audio_separator.separator import Separator as ASeparator
-
 from errors import WorkerError
 from audio_validation import verify_audio_file
 from local_model import require_local_mdx_model
@@ -34,7 +32,7 @@ STEM_TOKEN_MAP = {
 
 class SeparatorService:
     def __init__(self) -> None:
-        self._separators: dict[str, ASeparator] = {}
+        self._separators: dict[str, Any] = {}
 
     def separate(
         self,
@@ -53,13 +51,26 @@ class SeparatorService:
     ) -> tuple[list[dict[str, Any]], str, str, bool]:
         if not os.path.isfile(input_path):
             raise WorkerError("inference-failed", f"Input file not found: {input_path}")
+        if architecture == "demucs":
+            if segment_size is not None or config_path is not None:
+                raise WorkerError("architecture-unsupported", "Demucs uses validated local CPU profiles.")
+            from demucs_service import separate_demucs
+            return separate_demucs(model_id, model_path, input_path, output_dir,
+                                   requested_stems, output_format, device, profile, on_progress)
         if architecture != "mdx-net":
-            raise WorkerError("architecture-unsupported", "Only MDX-Net inference is supported in this preview.")
+            raise WorkerError("architecture-unsupported", "This model architecture is not integrated.")
         if device not in ("cpu", "auto"):
             raise WorkerError("device-unsupported", "This inference worker is CPU-only.")
         # The audio-separator library normally downloads missing checkpoints.
         # Never start the library until we verify an actual local checkpoint.
         verified_model = require_local_mdx_model(model_id, model_path)
+        # Import MDX-only dependencies lazily so HTDemucs jobs do not need
+        # the legacy UVR stack, and a missing optional module cannot prevent
+        # the whole worker process from reporting typed errors.
+        try:
+            from audio_separator.separator import Separator as ASeparator
+        except ImportError as exc:
+            raise WorkerError("architecture-unsupported", "MDX-Net CPU runtime dependency is missing.") from exc
         preset = resolve_profile(profile, segment_size)
         os.makedirs(output_dir, exist_ok=True)
 

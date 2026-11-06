@@ -54,6 +54,11 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r inference/requirements/cpu.txt --extra-index-url https://download.pytorch.org/whl/cpu
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          # Validate the native CPU stack before freezing it into an EXE.
+          python -m pip check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -c "import torch, torchvision, torchaudio, demucs.pretrained, demucs.apply, demucs.audio, audio_separator.separator; assert torch.__version__.startswith('2.5.1'); assert torchaudio.__version__.startswith('2.5.1'); assert not torch.cuda.is_available(); print('CPU Torch + TorchAudio + Demucs imports verified')"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m pip install pyinstaller pillow
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Package isolated Windows worker
@@ -115,6 +120,23 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "The selected FFprobe binary failed validation" }
           Get-FileHash resources/binaries/ffmpeg.exe -Algorithm SHA256 | Format-List
           Get-FileHash resources/binaries/ffprobe.exe -Algorithm SHA256 | Format-List
+      - name: Verify actual offline HTDemucs four-stem inference on Windows
+        if: ${{ github.event_name == 'pull_request' }}
+        shell: pwsh
+        timeout-minutes: 15
+        run: |
+          # Official checkpoint is downloaded to the ephemeral CI temp folder,
+          # hash-checked and never included in the downloadable Vocalizer ZIP.
+          $ErrorActionPreference = "Stop"
+          $model = Join-Path $env:RUNNER_TEMP "955717e8-8726e21a.th"
+          Invoke-WebRequest "https://dl.fbaipublicfiles.com/demucs/hybrid_transformer/955717e8-8726e21a.th" -OutFile $model
+          $digest = (Get-FileHash $model -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($digest -ne "8726e21a993978c7ba086d3872e7608d7d5bfca646ca4aca459ffda844faa8b4") {
+            throw "HTDemucs test checkpoint checksum mismatch"
+          }
+          python scripts/smoke-demucs.py --exe inference-dist/windows-x64/inference-worker.exe --model $model --ffmpeg resources/binaries/ffmpeg.exe --ffprobe resources/binaries/ffprobe.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Remove-Item -LiteralPath $model -Force
       - name: Prepare preview icon
         run: python scripts/create-preview-icon.py
       - name: Record stable UTC build date

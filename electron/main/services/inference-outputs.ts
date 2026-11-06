@@ -1,7 +1,7 @@
 /**
  * AI separation is run in an app-owned scratch folder. The worker must never
  * write into a user destination or delete pre-existing stems on cancellation.
- * Publish only two validated, distinct results with no-overwrite semantics.
+ * Publish only a complete set of two or four validated outputs with no-overwrite semantics.
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -9,7 +9,8 @@ import { createStagedOutput, publishStagedOutput, cleanupStagedOutput } from "./
 
 const JOB_ID = /^[a-zA-Z0-9_-]{1,80}$/;
 const VALID_EXT = new Set([".wav", ".mp3", ".flac"]);
-const STEM_NAMES = new Set(["Vocals", "Instrumental"]);
+const TWO_STEMS = new Set(["Vocals", "Instrumental"]);
+const FOUR_STEMS = new Set(["Vocals", "Drums", "Bass", "Other"]);
 
 export interface StemFile { stem: string; path: string }
 
@@ -21,9 +22,11 @@ export function publishInferenceStems(
   stems: StemFile[], scratch: string, destination: string, jobId: string
 ): StemFile[] {
   if (!JOB_ID.test(jobId)) throw new Error("Invalid inference job ID.");
-  if (stems.length !== 2 || new Set(stems.map(s => s.stem)).size !== 2 ||
-      stems.some(s => !STEM_NAMES.has(s.stem))) {
-    throw new Error("Expected one Vocals file and one Instrumental file.");
+  const received = new Set(stems.map(s => s.stem));
+  const expected = stems.length === 2 ? TWO_STEMS : stems.length === 4 ? FOUR_STEMS : null;
+  if (!expected || received.size !== expected.size ||
+      [...expected].some(stem => !received.has(stem))) {
+    throw new Error("Expected a complete, distinct two-stem or four-stem result.");
   }
   const scratchRoot = fs.realpathSync(scratch);
   const outputRoot = fs.realpathSync(destination);
@@ -46,7 +49,7 @@ export function publishInferenceStems(
   const stages: string[] = [];
   const published: { path: string; dev: number; ino: number; size: number }[] = [];
   try {
-    // Stage BOTH outputs before exposing either one to other applications.
+    // Stage ALL outputs before exposing any one to other applications.
     for (const item of inputs) {
       const stage = createStagedOutput(item.dest);
       stages.push(stage);

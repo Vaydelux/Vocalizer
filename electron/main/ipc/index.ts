@@ -72,32 +72,40 @@ function assertSender(event: IpcMainInvokeEvent): WebContents {
 const VERIFIED_MDX_NAME = "UVR-MDX-NET-Inst_HQ_5.onnx";
 const VERIFIED_MDX_SHA256 = "811cb24095d865763752310848b7ec86aeede0626cb05749ab35350e46897000";
 const VERIFIED_MDX_SIZE = 59074342;
+const VERIFIED_DEMUCS_NAME = "955717e8-8726e21a.th";
+const VERIFIED_DEMUCS_SHA256 = "8726e21a993978c7ba086d3872e7608d7d5bfca646ca4aca459ffda844faa8b4";
 
 async function verifyLocalModel(modelId: string, modelPath: string, architecture: string): Promise<void> {
-  if (!path.isAbsolute(modelPath)) {
-    throw studioError("MISSING_FILE", "Select the exact local checkpoint file.");
+  const approved = architecture === "mdx-net"
+    ? { name: VERIFIED_MDX_NAME, sha256: VERIFIED_MDX_SHA256, size: VERIFIED_MDX_SIZE }
+    : architecture === "demucs"
+      ? { name: VERIFIED_DEMUCS_NAME, sha256: VERIFIED_DEMUCS_SHA256, size: null }
+      : null;
+  if (!approved) {
+    throw studioError("ARCHITECTURE_UNSUPPORTED", "This inference architecture is not enabled in the packaged CPU worker.");
+  }
+  if (!path.isAbsolute(modelPath) || path.basename(modelPath) !== approved.name || modelId !== approved.name) {
+    throw studioError("MISSING_FILE", "Select the pinned local checkpoint with its exact filename.");
   }
   let size: number;
   try {
-    const stat = await fs.promises.stat(modelPath);
-    if (!stat.isFile()) throw new Error("Not a regular file");
+    const stat = await fs.promises.lstat(modelPath);
+    if (!stat.isFile() || stat.isSymbolicLink()) throw new Error("Not a regular checkpoint");
     size = stat.size;
   } catch {
-    throw studioError("MISSING_FILE", "The chosen model checkpoint is missing or unreadable.");
+    throw studioError("MISSING_FILE", "The selected checkpoint is missing, linked or unreadable.");
   }
-  if (architecture === "mdx-net" && (modelId === VERIFIED_MDX_NAME || path.basename(modelPath) === VERIFIED_MDX_NAME)) {
-    if (size !== VERIFIED_MDX_SIZE) {
-      throw studioError("MODEL_CORRUPTED", "The selected model does not match the approved checkpoint size.");
-    }
-    const hash = createHash("sha256");
-    try {
-      for await (const block of fs.createReadStream(modelPath)) hash.update(block);
-    } catch {
-      throw studioError("MISSING_FILE", "Cannot read the selected model file.");
-    }
-    if (hash.digest("hex") !== VERIFIED_MDX_SHA256) {
-      throw studioError("MODEL_CORRUPTED", "The selected checkpoint failed the SHA-256 integrity check.");
-    }
+  if (approved.size !== null && size !== approved.size) {
+    throw studioError("MODEL_CORRUPTED", "The selected checkpoint does not match the approved size.");
+  }
+  const hash = createHash("sha256");
+  try {
+    for await (const block of fs.createReadStream(modelPath)) hash.update(block);
+  } catch {
+    throw studioError("MISSING_FILE", "Cannot read the selected checkpoint.");
+  }
+  if (hash.digest("hex") !== approved.sha256) {
+    throw studioError("MODEL_CORRUPTED", "The model failed full SHA-256 verification.");
   }
 }
 
@@ -290,6 +298,16 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
     const req = inferenceSeparateRequestSchema.parse(raw);
     let scratch: string | null = null;
     try {
+      const expectedStems: string[] = req.architecture === "demucs"
+        ? ["Vocals", "Drums", "Bass", "Other"]
+        : ["Vocals", "Instrumental"];
+      if (req.requestedStems.length !== expectedStems.length ||
+          !expectedStems.every(stem => new Set<string>(req.requestedStems).has(stem))) {
+        throw studioError("ARCHITECTURE_UNSUPPORTED", "The model requires its complete supported stem set.");
+      }
+      if (!["auto", "cpu"].includes(req.device)) {
+        throw studioError("ARCHITECTURE_UNSUPPORTED", "Only local CPU inference is supported.");
+      }
       await verifyLocalModel(req.modelId, req.modelPath, req.architecture);
       const root = inferenceScratchBase(app.getPath("userData"));
       await fs.promises.mkdir(root, { recursive: true });
@@ -338,7 +356,7 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
         if (approved.size !== expected.size) {
           throw studioError("INFERENCE_FAILED", "The worker did not return one file for each requested stem.");
         }
-        // Publish only after both files are verified. The Python worker never
+        // Publish only after the complete stem set is verified. The Python worker never
         // has access to the user-selected destination and cannot erase files
         // already stored there when it is cancelled.
         const published = publishInferenceStems(result.stems, actualScratch, req.outputDir, req.jobId);

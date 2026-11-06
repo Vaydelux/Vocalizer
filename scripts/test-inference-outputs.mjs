@@ -31,6 +31,34 @@ try {
   assert.equal(fs.existsSync(path.join(dest,"Vocalizer-collision-vocals.wav")),false);
   assert.throws(()=>publishInferenceStems([{stem:"Vocals",path:vocal},{stem:"Vocals",path:inst}],scratch,dest,"abc234"),/Expected/);
   assert.throws(()=>publishInferenceStems([{stem:"Vocals",path:vocal},{stem:"Instrumental",path:old}],scratch,dest,"abc234"),/outside/);
+
+  // Four-stem output must be complete, distinct, isolated, and atomic.
+  const four = [
+    { stem: "Vocals", path: path.join(scratch, "four_(Vocals).wav") },
+    { stem: "Drums", path: path.join(scratch, "four_(Drums).wav") },
+    { stem: "Bass", path: path.join(scratch, "four_(Bass).wav") },
+    { stem: "Other", path: path.join(scratch, "four_(Other).wav") },
+  ];
+  for (const item of four) fs.writeFileSync(item.path, "test-" + item.stem);
+  const publishedFour = publishInferenceStems(four, scratch, dest, "fourstem");
+  assert.deepEqual(publishedFour.map(x => x.stem), ["Vocals", "Drums", "Bass", "Other"]);
+  for (const item of publishedFour) {
+    assert.equal(fs.readFileSync(item.path,"utf8"), "test-" + item.stem);
+  }
+  assert.throws(()=>publishInferenceStems(four.slice(0,3),scratch,dest,"partialfour"), /complete/);
+  assert.throws(()=>publishInferenceStems([...four.slice(0,3),four[0]],scratch,dest,"duplicatefour"), /complete/);
+  assert.throws(()=>publishInferenceStems([
+    {stem:"Vocals",path:four[0].path},
+    {stem:"Instrumental",path:four[1].path},
+    {stem:"Bass",path:four[2].path},
+    {stem:"Other",path:four[3].path}
+  ],scratch,dest,"mixedfour"), /complete/);
+  const oldDrums = path.join(dest,"Vocalizer-collision4-drums.wav");
+  fs.writeFileSync(oldDrums,"user-original");
+  assert.throws(()=>publishInferenceStems(four,scratch,dest,"collision4"), /already exists|EEXIST/);
+  assert.equal(fs.readFileSync(oldDrums,"utf8"), "user-original");
+  assert.equal(fs.existsSync(path.join(dest,"Vocalizer-collision4-vocals.wav")),false);
+
   const leaked=fs.mkdtempSync(path.join(scratchRoot,"job-"));
   fs.writeFileSync(path.join(leaked,"partial.wav"),"data");
   assert.equal(cleanupInferenceScratch(root),2);

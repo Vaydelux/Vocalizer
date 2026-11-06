@@ -247,7 +247,7 @@ if (!app.requestSingleInstanceLock()) {
         const parts = relativePath.split("/");
         if (parts.length !== 3 ||
             !/^[a-zA-Z0-9_-]{1,80}$/.test(parts[1]) ||
-            !["Vocals", "Instrumental"].includes(parts[2])) {
+            !["Vocals", "Instrumental", "Drums", "Bass", "Other"].includes(parts[2])) {
           return new Response("Not found", { status: 404 });
         }
         const media = await resolveCompletedStemForPlayback(parts[1], parts[2]);

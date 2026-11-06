@@ -5,6 +5,7 @@ successful separation from filename creation alone.
 
 from __future__ import annotations
 import json
+import math
 import os
 import subprocess
 from errors import WorkerError
@@ -22,8 +23,9 @@ def probe(path: str) -> dict:
 
 
 def verify_audio_file(path: str, expected_duration: float | None = None,
-                      tolerance: float = 0.5) -> None:
-    import os
+                      tolerance: float = 0.5,
+                      expected_sample_rate: int | None = None,
+                      expected_channels: int | None = None) -> None:
     if not os.path.isfile(path):
         raise WorkerError("encoding-failed", f"Output file missing: {path}")
     if os.path.getsize(path) == 0:
@@ -34,10 +36,14 @@ def verify_audio_file(path: str, expected_duration: float | None = None,
         raise WorkerError("encoding-failed", f"No audio stream in {path}")
     s = streams[0]
     dur = float(s.get("duration") or info.get("format", {}).get("duration") or 0)
-    if dur <= 0:
-        raise WorkerError("encoding-failed", f"Zero/negative duration for {path}")
-    if expected_duration and abs(dur - expected_duration) > tolerance:
+    if not math.isfinite(dur) or dur <= 0:
+        raise WorkerError("encoding-failed", f"Invalid duration for {path}")
+    if expected_duration is not None and abs(dur - expected_duration) > tolerance:
         raise WorkerError(
             "encoding-failed",
             f"Duration mismatch for {path}: {dur:.2f}s vs expected {expected_duration:.2f}s",
         )
+    if expected_sample_rate is not None and int(s.get("sample_rate") or 0) != expected_sample_rate:
+        raise WorkerError("encoding-failed", f"Sample-rate mismatch in {path}")
+    if expected_channels is not None and int(s.get("channels") or 0) != expected_channels:
+        raise WorkerError("encoding-failed", f"Channel-count mismatch in {path}")
