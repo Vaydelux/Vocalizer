@@ -81,6 +81,7 @@ describe("large saved-stem project recovery", () => {
     expect(restored.url).toBe("las://renderer/__stem-audio/recover_7/Vocals");
     expect(useMixer.getState().lanes[0].trackId).toBe("original-track");
     expect(serializeProject().tracks[0].name).toBe(filename);
+    expect(serializeProject().tracks[0]).not.toHaveProperty("nativePath");
     expect(useProject.getState().isDirty).toBe(true);
   });
 
