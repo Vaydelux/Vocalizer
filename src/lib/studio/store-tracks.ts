@@ -105,6 +105,10 @@ export const useTracks = create<TracksStore>((set, get) => ({
   retryTrack: (id) => {
     const track = get().tracks.find((t) => t.id === id);
     if (!track || track.status === "checking") return;
+    if (track.file.size === 0) {
+      toast.error("Original media unavailable", { description: "Re-import the original audio file to restore this track." });
+      return;
+    }
     set((s) => ({
       tracks: s.tracks.map((t) => t.id === id
         ? { ...t, status: "checking", error: undefined, meta: null } : t),

@@ -17,15 +17,12 @@ describe("enterprise compliance & audit reporting", () => {
   });
 
   it("evaluates EBU R128 broadcast compliance properly", () => {
-    // Exact streaming standard: -14.0 LUFS, -1.0 dBFS True Peak
-    expect(evaluateEbuR128Compliance(-14.0, -1.0)).toBe(true);
-    expect(evaluateEbuR128Compliance(-14.2, -1.2)).toBe(true);
-
-    // Too loud (True peak clipping risk)
-    expect(evaluateEbuR128Compliance(-14.0, -0.2)).toBe(false);
-
-    // Too quiet (outside -15.5 LUFS)
+    expect(evaluateEbuR128Compliance(-23.0, -1.0)).toBe(true);
+    expect(evaluateEbuR128Compliance(-23.2, -1.2)).toBe(true);
+    expect(evaluateEbuR128Compliance(-14.0, -1.0)).toBe(false);
+    expect(evaluateEbuR128Compliance(-23.0, -0.2)).toBe(false);
     expect(evaluateEbuR128Compliance(-19.0, -1.5)).toBe(false);
+    expect(evaluateEbuR128Compliance(NaN, -1.0)).toBe(false);
   });
 
   it("validates compliance audit entry schema against zod", () => {
@@ -51,7 +48,7 @@ describe("enterprise compliance & audit reporting", () => {
         durationSec: 184.2,
       },
       loudnessMetrics: {
-        integratedLufs: -14.0,
+        integratedLufs: -23.0,
         truePeakDb: -1.0,
         loudnessRangeLra: 8.5,
         ebuR128Compliant: true,

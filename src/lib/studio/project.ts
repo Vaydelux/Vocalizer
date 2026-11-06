@@ -188,7 +188,8 @@ export async function hydrateProject(project: VocalizerProject): Promise<void> {
     manualKeyByTrack: project.analysis.manualKeyByTrack || {},
   });
 
-  // 3. Restore Tracks placeholder (restores metadata so library and tools work immediately)
+  // 3. Restore metadata only. Audio must be re-imported before processing.
+  useTracks.getState().clearAll();
   const restoredTracks: AudioTrack[] = project.tracks.map((pt) => {
     // Create an empty dummy file representation
     const file = new File([], pt.name, { type: pt.mime || "audio/wav", lastModified: pt.addedAt });
@@ -198,7 +199,8 @@ export async function hydrateProject(project: VocalizerProject): Promise<void> {
       size: pt.size,
       mime: pt.mime,
       addedAt: pt.addedAt,
-      status: "ready",
+      status: "error",
+      error: { code: "MISSING_FILE", message: "Re-import the original audio file before processing this restored track." },
       file,
       url: "",
       meta: pt.meta,
@@ -265,7 +267,7 @@ export async function loadProjectFromFile(file: File): Promise<void> {
     const raw = await file.text();
     const project = parseProjectJson(raw);
     await hydrateProject(project);
-    toast.success("Project loaded", { description: `${project.title} (${project.tracks.length} tracks)` });
+    toast.info("Project metadata loaded", { description: `${project.tracks.length} audio track(s) require re-import before processing.` });
   } catch (err) {
     const msg = (err as Error).message || "Failed to parse project file";
     toast.error("Failed to load project", { description: msg });
