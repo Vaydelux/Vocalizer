@@ -23,9 +23,11 @@ import {
   resolvePathRequestSchema,
   nativeSettingsSchema,
   type FfmpegProgress,
+  type FfmpegOp,
   type NativeSettings,
 } from "../../shared/ipc";
 import { probeFile } from "../services/ffprobe";
+import { parseNativeStemInput } from "../../shared/stem-input";
 import { runFfmpeg, cancelJob, toMainErrorPayload } from "../services/ffmpeg";
 import { getSettings, setSettings } from "../services/settings";
 import { stageRecordingBytes, discardRecordingFile } from "../services/recording-staging";
@@ -131,6 +133,44 @@ export async function resolveCompletedStemForPlayback(jobId: string, stem: strin
     return null;
   }
 }
+/** Convert an opaque verified stem token to a real main-owned file path.
+ * Renderer-supplied absolute paths are never needed for stem-backed lanes.
+ * Every resolution checks that the completed stem still exists on disk. */
+async function resolveNativeAudioInput(value: string): Promise<string> {
+  let ref: ReturnType<typeof parseNativeStemInput>;
+  try {
+    ref = parseNativeStemInput(value);
+  } catch {
+    throw studioError("PERMISSION_DENIED", "Malformed stem source reference.");
+  }
+  if (!ref) return value;
+  const approved = await resolveCompletedStemForPlayback(ref.jobId, ref.stem);
+  if (!approved) {
+    throw studioError("MISSING_FILE", "This stem is no longer registered or available. Rerun separation.");
+  }
+  return approved;
+}
+
+async function resolveNativeAudioInputs(op: FfmpegOp): Promise<FfmpegOp> {
+  switch (op.kind) {
+    case "trim":
+    case "pitch":
+    case "convert":
+      return { ...op, inputPath: await resolveNativeAudioInput(op.inputPath) };
+    case "join":
+      return { ...op, inputPaths: await Promise.all(op.inputPaths.map(resolveNativeAudioInput)) };
+    case "mix":
+      return { ...op,
+        instrumentalPath: await resolveNativeAudioInput(op.instrumentalPath),
+        vocalPath: await resolveNativeAudioInput(op.vocalPath) };
+    case "multitrack":
+      return { ...op,
+        lanes: await Promise.all(op.lanes.map(async lane => ({
+          ...lane, inputPath: await resolveNativeAudioInput(lane.inputPath),
+        }))) };
+  }
+}
+
 export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): void {
   getPrimaryWindow = getMainWindow;
   /* --------------------------------- dialogs -------------------------------- */
@@ -212,7 +252,8 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
     if (request.kind === "mix" && request.vocalPath === "__recording__" && !stagedFile) {
       throw studioError("MISSING_FILE", "The microphone recording is not staged for this job.");
     }
-    const op = stagedFile && request.kind === "mix" ? { ...request, vocalPath: stagedFile } : request;
+    const stagedOp = stagedFile && request.kind === "mix" ? { ...request, vocalPath: stagedFile } : request;
+    const op = await resolveNativeAudioInputs(stagedOp);
     const emit = (p: FfmpegProgress) => {
       if (!sender.isDestroyed()) sender.send(IPC.FFMPEG_PROGRESS, p);
     };
@@ -394,6 +435,19 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
     assertSender(event);
     const req = cancelRequestSchema.parse(raw ?? {});
     return { cancelled: cancelSeparation(req.jobId) };
+  });
+
+  ipcMain.handle(IPC.INFERENCE_PROBE_STEM, async (event, raw) => {
+    assertSender(event);
+    const req = revealInferenceStemSchema.parse(raw);
+    const approved = await resolveCompletedStemForPlayback(req.jobId, req.stem);
+    if (!approved) throw studioError("MISSING_FILE", "Verified stem output is unavailable.");
+    const metadata = await probeFile(approved);
+    if (!Number.isFinite(metadata.duration) || metadata.duration <= 0 || metadata.sizeBytes <= 0 ||
+        !metadata.channels || !metadata.sampleRate) {
+      throw studioError("DECODE_FAILED", "Native stem metadata could not be verified.");
+    }
+    return metadata;
   });
 
   ipcMain.handle(IPC.INFERENCE_REVEAL_STEM, async (event, raw) => {

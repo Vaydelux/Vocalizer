@@ -171,6 +171,7 @@ export interface StudioNativeApi {
   }): Promise<InferenceSeparateResult>;
   cancelInference(req: { jobId: string }): Promise<{ cancelled: boolean }>;
   revealInferenceStem(req: { jobId: string; stem: InferenceStemResult["stem"] }): Promise<{ revealed: boolean }>;
+  probeInferenceStem(req: { jobId: string; stem: InferenceStemResult["stem"] }): Promise<NativeAudioMeta>;
   onInferenceProgress(cb: (p: InferenceProgress) => void): () => void;
   getSettings(): Promise<NativeSettings>;
   setSettings(patch: Partial<NativeSettings>): Promise<NativeSettings>;
