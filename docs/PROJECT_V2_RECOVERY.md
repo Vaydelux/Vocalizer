@@ -57,7 +57,8 @@ picker for missing stems with Vocalizer's published filename convention:
   automation and DSP settings. The project is marked dirty after relinking.
 - Session credentials are not persisted. On another restart the same user
   selection must be made again. Native capability tokens and raw file paths
-  are never sourced from project JSON.
+  are never sourced from project JSON. New project saves omit historical
+  `nativePath` metadata (older v2 files may still contain it, but it is ignored).
 - When no missing published stems remain, **Relink Audio** still falls back to
   the standard file-picker path for other user-imported audio (500 MiB cap).
 - A renamed stem or a non-Vocalizer audio file cannot use this specialized
