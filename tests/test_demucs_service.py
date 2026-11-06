@@ -106,6 +106,7 @@ class DemucsServiceTests(unittest.TestCase):
             self.assertEqual(kwargs["model"].sources, FakeModel.sources)
             self.assertEqual(kwargs["profile"]["segment"], 7)
             self.assertEqual(kwargs["output_format"], "wav24")
+            self.assertEqual(kwargs["chunk_seconds"], 24)
 
 
 if __name__ == "__main__":

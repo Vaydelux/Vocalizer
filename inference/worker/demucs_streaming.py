@@ -46,6 +46,7 @@ def render_streaming_stems(
     profile: dict[str, float | int],
     input_duration: float,
     on_progress,
+    chunk_seconds: float = CORE_SECONDS,
 ) -> list[dict[str, str]]:
     try:
         import numpy as np
@@ -79,7 +80,7 @@ def render_streaming_stems(
 
     total_frames = round(input_duration * samplerate)
     windows, fade = plan_chunks(
-        total_frames, samplerate, core_seconds=CORE_SECONDS,
+        total_frames, samplerate, core_seconds=chunk_seconds,
         context_seconds=CONTEXT_SECONDS, crossfade_seconds=CROSSFADE_SECONDS,
     )
 

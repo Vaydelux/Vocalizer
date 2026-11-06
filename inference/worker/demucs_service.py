@@ -90,6 +90,7 @@ def separate_demucs(
             profile=PROFILES[profile],
             input_duration=input_duration,
             on_progress=on_progress,
+            chunk_seconds=8 if profile == "low-memory" else 24,
         )
     except WorkerError:
         raise
