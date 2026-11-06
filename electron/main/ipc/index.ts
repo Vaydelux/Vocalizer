@@ -82,7 +82,7 @@ async function verifyLocalModel(modelId: string, modelPath: string, architecture
       ? { name: VERIFIED_DEMUCS_NAME, sha256: VERIFIED_DEMUCS_SHA256, size: null }
       : null;
   if (!approved) {
-    throw studioError("MODEL_UNAVAILABLE", "This inference architecture is not enabled in the packaged CPU worker.");
+    throw studioError("ARCHITECTURE_UNSUPPORTED", "This inference architecture is not enabled in the packaged CPU worker.");
   }
   if (!path.isAbsolute(modelPath) || path.basename(modelPath) !== approved.name || modelId !== approved.name) {
     throw studioError("MISSING_FILE", "Select the pinned local checkpoint with its exact filename.");
@@ -303,10 +303,10 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
         : ["Vocals", "Instrumental"];
       if (req.requestedStems.length !== expectedStems.length ||
           !expectedStems.every(stem => req.requestedStems.includes(stem))) {
-        throw studioError("MODEL_UNAVAILABLE", "The model requires its complete supported stem set.");
+        throw studioError("ARCHITECTURE_UNSUPPORTED", "The model requires its complete supported stem set.");
       }
       if (!["auto", "cpu"].includes(req.device)) {
-        throw studioError("MODEL_UNAVAILABLE", "Only local CPU inference is supported.");
+        throw studioError("ARCHITECTURE_UNSUPPORTED", "Only local CPU inference is supported.");
       }
       await verifyLocalModel(req.modelId, req.modelPath, req.architecture);
       const root = inferenceScratchBase(app.getPath("userData"));
