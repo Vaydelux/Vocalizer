@@ -164,25 +164,17 @@ export function serializeProject(): VocalizerProject {
   const u = useUi.getState();
   const mixer = useMixer.getState();
 
-  const tracks: ProjectTrack[] = t.tracks.map((track) => {
-    let nativePath: string | undefined = undefined;
-    if (isNative()) {
-      try {
-        nativePath = native()?.getPathForFile(track.file) || undefined;
-      } catch {
-        // Ignored
-      }
-    }
-    return {
-      id: track.id,
-      name: track.name,
-      size: track.size,
-      mime: track.mime,
-      addedAt: track.addedAt,
-      nativePath,
-      meta: track.meta,
-    };
-  });
+  // v2 project files contain only safe metadata. Native filesystem paths are
+  // neither trusted for relinking nor useful after restart; omit them to avoid
+  // exposing the user's local directory names when projects are shared.
+  const tracks: ProjectTrack[] = t.tracks.map((track) => ({
+    id: track.id,
+    name: track.name,
+    size: track.size,
+    mime: track.mime,
+    addedAt: track.addedAt,
+    meta: track.meta,
+  }));
 
   return {
     schema: PROJECT_MAGIC_SCHEMA,
