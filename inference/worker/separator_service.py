@@ -10,8 +10,6 @@ import os
 import time
 from typing import Any
 
-from audio_separator.separator import Separator as ASeparator
-
 from errors import WorkerError
 from audio_validation import verify_audio_file
 from local_model import require_local_mdx_model
@@ -34,7 +32,7 @@ STEM_TOKEN_MAP = {
 
 class SeparatorService:
     def __init__(self) -> None:
-        self._separators: dict[str, ASeparator] = {}
+        self._separators: dict[str, Any] = {}
 
     def separate(
         self,
@@ -66,6 +64,13 @@ class SeparatorService:
         # The audio-separator library normally downloads missing checkpoints.
         # Never start the library until we verify an actual local checkpoint.
         verified_model = require_local_mdx_model(model_id, model_path)
+        # Import MDX-only dependencies lazily so HTDemucs jobs do not need
+        # the legacy UVR stack, and a missing optional module cannot prevent
+        # the whole worker process from reporting typed errors.
+        try:
+            from audio_separator.separator import Separator as ASeparator
+        except ImportError as exc:
+            raise WorkerError("architecture-unsupported", "MDX-Net CPU runtime dependency is missing.") from exc
         preset = resolve_profile(profile, segment_size)
         os.makedirs(output_dir, exist_ok=True)
 

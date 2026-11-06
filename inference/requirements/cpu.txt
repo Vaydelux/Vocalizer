@@ -11,6 +11,8 @@
 # and verify the packaged worker imports and runs on the Windows runner.
 
 audio-separator==0.47.2
+# audio-separator 0.47.2 imports this legacy decoder without declaring it.
+audioread==3.0.1
 onnxruntime==1.31.1
 torch==2.5.1+cpu
 torchvision==0.20.1+cpu
