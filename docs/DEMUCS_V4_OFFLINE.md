@@ -60,3 +60,16 @@ private scratch is cleaned up.
   before bundling or distributing model weights.
 
 RoFormer, DirectML and CUDA are not enabled by this feature.
+
+## Safety limits during preview
+
+Until a streaming decoder and bounded multi-chunk source reconstruction are
+implemented, this CPU preview accepts recordings **up to 10 minutes** long.
+The input is probed before loading its waveform; longer inputs are rejected
+with a clear message rather than risking an out-of-memory crash.
+
+Because PyTorch model files use object serialization, the hash-verified model
+is copied into a private one-file repository and the copied bytes are hashed
+**again** before they are deserialized. This mitigates a checkpoint replacement
+race between initial verification and model loading. Neither the worker nor
+Windows CI bundles weights into the user-facing ZIP.

@@ -76,6 +76,7 @@ class FakeBoolean:
 
 def local_model(signature, repo):
     assert signature == "955717e8" and repo.is_dir()
+    assert (repo / DEMUCS_FILENAME).read_bytes() == b"fixture weights"
     return FakeModel()
 
 
@@ -103,6 +104,32 @@ class DemucsServiceTests(unittest.TestCase):
                             list(FOUR_STEMS), "wav", "cuda", "balanced", lambda *_: None)
         self.assertEqual(exc.exception.code, "device-unsupported")
 
+    def test_oversized_recording_fails_before_loading_model(self):
+        with tempfile.TemporaryDirectory() as folder:
+            source = Path(folder) / "long.wav"
+            source.write_bytes(b"fixture")
+            with patch("demucs_service.probe", return_value={
+                "streams": [{"codec_type": "audio"}],
+                "format": {"duration": "1000"},
+            }):
+                with self.assertRaises(WorkerError) as exc:
+                    separate_demucs(DEMUCS_FILENAME, "missing.th", str(source), folder,
+                                    list(FOUR_STEMS), "wav", "cpu", "low-memory", lambda *_: None)
+            self.assertEqual(exc.exception.code, "inference-failed")
+            self.assertIn("10 minutes", exc.exception.message)
+
+    def test_invalid_audio_metadata_is_rejected(self):
+        with tempfile.TemporaryDirectory() as folder:
+            source = Path(folder) / "invalid.wav"
+            source.write_bytes(b"fixture")
+            with patch("demucs_service.probe", return_value={
+                "streams": [{"codec_type": "video"}], "format": {"duration": "5"},
+            }):
+                with self.assertRaises(WorkerError) as exc:
+                    separate_demucs(DEMUCS_FILENAME, "missing.th", str(source), folder,
+                                    list(FOUR_STEMS), "wav", "cpu", "low-memory", lambda *_: None)
+            self.assertEqual(exc.exception.code, "inference-failed")
+
     def test_real_api_contract_and_four_output_validation(self):
         torch = types.ModuleType("torch")
         torch.no_grad = nullcontext
@@ -129,6 +156,10 @@ class DemucsServiceTests(unittest.TestCase):
                                          "demucs.apply": apply,
                                          "demucs.audio": audio}),
                 patch("demucs_service.require_local_demucs_model", return_value=model_file),
+                patch("demucs_service.probe", return_value={
+                    "streams": [{"codec_type": "audio"}],
+                    "format": {"duration": "3.0"},
+                }),
                 patch("demucs_service.verify_audio_file", side_effect=lambda p, **kwargs: (
                     self.assertTrue(Path(p).is_file()),
                     self.assertEqual(kwargs["expected_channels"], 2),
