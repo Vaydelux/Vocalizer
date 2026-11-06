@@ -63,3 +63,27 @@ renderer fetching the entire recording.
 - This improves the transport layer; it does **not** certify fast seek
   accuracy for every codec or eliminate decoder/FFmpeg memory usage.
   Real long-session Windows playback and memory benchmarks remain gates.
+
+## Reproducible synthetic transport benchmark
+
+The CI source and Windows preview workflows now run:
+
+```powershell
+bun scripts/benchmark-stem-stream.ts --output reports/stem-stream.json
+```
+
+This creates a temporary **sparse 512 MiB file** with known byte markers,
+requests verified 2 MiB byte ranges at the beginning, middle, and end
+(four repetitions), and compares SHA-256 digests of actual returned bytes.
+It produces a compact JSON artifact recording the source commit, request
+count, bytes received, process CPU time, wall time, and **sampled** process
+RSS increase. The regression guardrail is a generous 256 MiB sampled RSS
+increase, not a claim of a fixed memory usage across all machines.
+
+CI retains Linux and Windows metrics artifacts for 14 days. These metrics
+cover a synthetic streaming transport path, **not** the private working set
+of the Electron renderer, audio decoding, listening quality, long-session
+playback smoothness, disk throughput with real compressed media, or user
+hardware. Compare measurements only on like-for-like machines and test
+fixtures. Windows GUI memory and repeated real-song audition remain mandatory
+manual acceptance gates.

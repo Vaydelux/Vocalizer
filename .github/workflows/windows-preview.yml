@@ -48,6 +48,18 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           bun run typecheck:electron
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Benchmark synthetic native stem byte-range streaming
+        shell: pwsh
+        run: |
+          bun scripts/benchmark-stem-stream.ts --output reports/stem-stream-windows.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Upload native streaming benchmark (Windows)
+        uses: actions/upload-artifact@v4
+        with:
+          name: vocalizer-stem-stream-windows-${{ github.sha }}
+          path: reports/stem-stream-windows.json
+          retention-days: 14
+          if-no-files-found: error
       - name: Install CPU inference dependencies
         shell: pwsh
         run: |
