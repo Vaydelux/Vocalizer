@@ -18,3 +18,5 @@ See [Initial release plan](docs/INITIAL_RELEASE.md) for required Windows packagi
 **Do not ship model files or credentials without reviewing their permissions and provenance.**
 
 For the local-only experimental HTDemucs v4 four-stem workflow, see [HTDemucs checkpoint and acceptance guide](docs/DEMUCS_V4_OFFLINE.md). Model weights are not included in the application.
+
+Project recovery: [Version 2 project format and manual media relinking](docs/PROJECT_V2_RECOVERY.md).

@@ -348,6 +348,15 @@ export interface MultitrackTaskInput {
 }
 
 export function makeMultitrackTask(input: MultitrackTaskInput) {
+  // Protect both renderer and native callers from silently exporting an
+  // incomplete mix after project metadata was restored without audio files.
+  if (input.lanes.length === 0 || input.lanes.some(({ track }) =>
+    track.status !== "ready" || track.file.size === 0
+  )) {
+    return async (_ctx: JobCtx): Promise<JobResultFile> => {
+      throw studioError("MISSING_FILE", "One or more mixer tracks are unavailable. Relink and validate source media before exporting.");
+    };
+  }
   if (isNative()) {
     return (ctx: JobCtx) =>
       nativeMultitrackTask(
