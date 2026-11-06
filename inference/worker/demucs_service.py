@@ -7,12 +7,17 @@ must pass a full SHA-256 check before the torch deserialization step.
 from __future__ import annotations
 from pathlib import Path
 from typing import Any
+from tempfile import TemporaryDirectory
+import math
+import shutil
 
-from audio_validation import verify_audio_file
+from audio_validation import probe, verify_audio_file
 from errors import WorkerError
 from local_model import DEMUCS_SIGNATURE, require_local_demucs_model
 
 FOUR_STEMS = ("Vocals", "Drums", "Bass", "Other")
+# Until bounded decoding is implemented, the whole recording is resident in RAM.
+MAX_PREVIEW_INPUT_SECONDS = 600
 PROFILES = {
     "low-memory": {"shifts": 1, "overlap": 0.1, "segment": 7},
     "balanced": {"shifts": 1, "overlap": 0.25, "segment": 7},
@@ -36,6 +41,30 @@ def separate_demucs(
     if not Path(input_path).is_file():
         raise WorkerError("inference-failed", "Audio input file does not exist.")
 
+    # A full-song decode produces large in-memory tensors. Reject very long
+    # recordings before allocating waveforms until streaming is implemented.
+    try:
+        metadata = probe(input_path)
+        audio_streams = [stream for stream in metadata.get("streams", [])
+                         if stream.get("codec_type") == "audio"]
+        if not audio_streams:
+            raise WorkerError("inference-failed", "Input has no audio stream.")
+        raw_duration = (metadata.get("format", {}).get("duration")
+                        or audio_streams[0].get("duration"))
+        input_duration = float(raw_duration)
+    except WorkerError:
+        raise
+    except (ValueError, TypeError, KeyError, OverflowError) as exc:
+        raise WorkerError("inference-failed", "Audio input has no reliable duration.") from exc
+    if not math.isfinite(input_duration) or input_duration <= 0:
+        raise WorkerError("inference-failed", "Audio input duration is invalid.")
+    if input_duration > MAX_PREVIEW_INPUT_SECONDS:
+        raise WorkerError(
+            "inference-failed",
+            "Experimental Demucs preview supports at most 10 minutes per job; "
+            "split the recording or use the two-stem workflow.",
+        )
+
     checkpoint = require_local_demucs_model(model_id, model_path)
     try:
         import torch
@@ -47,9 +76,15 @@ def separate_demucs(
 
     on_progress(None, "Loading verified HTDemucs")
     try:
-        # Never use a model alias without a local repo: it could fetch weights.
-        model = get_model(DEMUCS_SIGNATURE, repo=checkpoint.parent)
-        model.cpu().eval()
+        # Recheck an isolated copy to close the check/load race for serialized
+        # PyTorch checkpoints and keep unrelated .th files out of LocalRepo.
+        with TemporaryDirectory(prefix="vocalizer-verified-demucs-") as tmp:
+            staged = Path(tmp) / checkpoint.name
+            shutil.copyfile(checkpoint, staged)
+            require_local_demucs_model(model_id, str(staged))
+            # This signature resolves from a private one-file repository.
+            model = get_model(DEMUCS_SIGNATURE, repo=staged.parent)
+            model.cpu().eval()
         samplerate = model.samplerate
         channels = model.audio_channels
         if set(model.sources) != {x.lower() for x in FOUR_STEMS}:
