@@ -84,7 +84,7 @@ def render_streaming_stems(
         context_seconds=CONTEXT_SECONDS, crossfade_seconds=CROSSFADE_SECONDS,
     )
 
-    scratch_paths = {stem: destination / f"htdemucs_{stem}.float.wav" for stem in STEMS}
+    scratch_paths = {stem: destination / f"htdemucs_({stem}).float.wav" for stem in STEMS}
     suffix = {"wav": "wav", "wav24": "wav", "flac": "flac", "mp3": "mp3"}[output_format]
     output_paths = {stem: destination / f"htdemucs_({stem}).{suffix}" for stem in STEMS}
     for filename in list(scratch_paths.values()) + list(output_paths.values()):
