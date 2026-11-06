@@ -37,6 +37,7 @@ export const IPC = {
   INFERENCE_PROGRESS: "inference:progress",
   INFERENCE_REVEAL_STEM: "inference:revealStem",
   INFERENCE_PROBE_STEM: "inference:probeStem",
+  INFERENCE_RELINK_STEMS: "inference:relinkStems",
 } as const;
 
 export type IpcChannel = (typeof IPC)[keyof typeof IPC];
@@ -202,6 +203,28 @@ export const revealInferenceStemSchema = z.object({
   jobId: z.string().min(1).max(80),
   stem: z.enum(["Vocals", "Instrumental", "Drums", "Bass", "Guitar", "Piano", "Other"]),
 });
+/** User-approved native file picker for relinking published stems.
+ * Only known published filenames, exact bytes and probed duration can match.
+ * No path from project JSON is ever passed to main. */
+export const nativeStemRelinkRequestSchema = z.object({
+  expected: z.array(z.object({
+    name: z.string().min(1).max(255),
+    size: z.number().int().positive().max(100 * 1024 * 1024 * 1024),
+    duration: z.number().finite().positive().max(86400).nullable(),
+  })).min(1).max(128),
+});
+export type NativeStemRelinkRequest = z.infer<typeof nativeStemRelinkRequestSchema>;
+export interface NativeStemRelinkResponse {
+  cancelled: boolean;
+  rejected: number;
+  files: Array<{
+    name: string;
+    jobId: string;
+    stem: InferenceStemResult["stem"];
+    meta: NativeAudioMeta;
+  }>;
+}
+
 export interface InferenceStatus {
   workerAvailable: boolean;
   runtimes: string[];
@@ -311,6 +334,7 @@ export interface StudioNativeApi {
   revealInferenceStem(req: { jobId: string; stem: InferenceStemResult["stem"] }): Promise<{ revealed: boolean }>;
   /** Privileged FFprobe, only for completed and still registered stem outputs. */
   probeInferenceStem(req: { jobId: string; stem: InferenceStemResult["stem"] }): Promise<NativeAudioMeta>;
+  relinkInferenceStems(req: NativeStemRelinkRequest): Promise<NativeStemRelinkResponse>;
   onInferenceProgress(cb: (p: InferenceProgress) => void): () => void;
   getSettings(): Promise<NativeSettings>;
   setSettings(patch: Partial<NativeSettings>): Promise<NativeSettings>;
