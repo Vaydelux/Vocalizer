@@ -302,7 +302,7 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
         ? ["Vocals", "Drums", "Bass", "Other"]
         : ["Vocals", "Instrumental"];
       if (req.requestedStems.length !== expectedStems.length ||
-          !expectedStems.every(stem => req.requestedStems.includes(stem))) {
+          !expectedStems.every(stem => new Set<string>(req.requestedStems).has(stem))) {
         throw studioError("ARCHITECTURE_UNSUPPORTED", "The model requires its complete supported stem set.");
       }
       if (!["auto", "cpu"].includes(req.device)) {
