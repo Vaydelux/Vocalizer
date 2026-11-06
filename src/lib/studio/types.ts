@@ -12,7 +12,7 @@ import type { StudioErrorCode } from "./errors";
 
 export type TrackStatus = "checking" | "ready" | "error";
 
-export type MetaSource = "decoded" | "element" | "none";
+export type MetaSource = "decoded" | "element" | "native-probe" | "none";
 
 export interface AudioMeta {
   /** Duration in seconds. Always real (decoded or measured). */
@@ -37,6 +37,8 @@ export interface AudioTrack {
   status: TrackStatus;
   error?: { code: StudioErrorCode; message: string };
   file: File;
+  /** Completed inference output authorized in main, never renderer audio bytes. */
+  nativeStem?: { jobId: string; stem: ModelStem };
   url: string;
   meta: AudioMeta | null;
 }

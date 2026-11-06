@@ -36,6 +36,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useMixer, isLaneAudible, type TrackLane } from "@/lib/studio/store-mixer";
 import { useTracks, getTrackById } from "@/lib/studio/store-tracks";
+import { hasUsableTrackAudio } from "@/lib/studio/native-stem-track";
 import { useJobs } from "@/lib/studio/store-jobs";
 import { makeMultitrackTask } from "@/lib/studio/tasks";
 import { MixerChannelStrip } from "@/components/studio/mixer-channel-strip";
@@ -103,7 +104,7 @@ export function MixerView() {
 
     const missingLanes = audibleLanes.filter((lane) => {
       const track = getTrackById(lane.trackId);
-      return !track || track.status !== "ready" || track.file.size === 0;
+      return !track || !hasUsableTrackAudio(track);
     });
     if (missingLanes.length > 0) {
       toast.error("Mixdown blocked: original audio is missing", {
@@ -421,6 +422,37 @@ export function MixerView() {
                   onChange={(patch) => updateLaneSpatial(selectedLane.id, patch)}
                 />
               )}
+
+              {/* Audition one selected source without materializing a Blob.
+                  This is a single-lane preview, not a simulated master mix. */}
+              {selectedLane && (() => {
+                const source = getTrackById(selectedLane.trackId);
+                if (!source || source.status !== "ready" || !source.url) return null;
+                return (
+                  <Card>
+                    <CardHeader className="py-2.5 px-3 border-b border-border/40">
+                      <CardTitle className="text-xs">Source Audition — {selectedLane.name}</CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-3 space-y-2">
+                      {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+                      <audio
+                        key={source.id}
+                        src={source.url}
+                        controls
+                        preload="metadata"
+                        className="w-full"
+                        aria-label={`Audition ${selectedLane.name}`}
+                      />
+                      <p className="text-[11px] text-muted-foreground">
+                        {source.nativeStem
+                          ? "File-backed source: audio streams from the verified local stem, without a renderer Blob copy."
+                          : "Auditioning the original imported audio file."}
+                        {" "}This previews one lane; Bounce Master exports the full mixed arrangement.
+                      </p>
+                    </CardContent>
+                  </Card>
+                );
+              })()}
 
               {/* Inspector DSP Rack */}
               {selectedLane && (

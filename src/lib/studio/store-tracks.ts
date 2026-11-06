@@ -13,12 +13,18 @@ import { probeMetadata, MAX_DECODE_BYTES } from "./decode";
 import { dropPeaks } from "./peaks";
 import { studioError, toStudioError } from "./errors";
 import { formatBytes } from "./format";
+import { native } from "./native";
+import { audioMetaFromNativeProbe } from "./native-stem-track";
+import { nativeStemPlaybackUrl } from "../../../electron/shared/stem-input";
+import type { ModelStem } from "./types";
 
 export const MAX_IMPORT_BYTES = 500 * 1024 * 1024; // 500 MB hard import cap
 
 interface TracksStore {
   tracks: AudioTrack[];
   addFiles: (files: File[] | FileList) => void;
+  /** Register a completed, verified native stem without fetching it into RAM. */
+  addNativeStem: (jobId: string, stem: ModelStem, displayName: string) => Promise<string>;
   removeTrack: (id: string) => void;
   retryTrack: (id: string) => void;
   clearAll: () => void;
@@ -53,6 +59,43 @@ async function probeTrack(track: AudioTrack): Promise<void> {
 
 export const useTracks = create<TracksStore>((set, get) => ({
   tracks: [],
+  addNativeStem: async (jobId, stem, displayName) => {
+    const existing = get().tracks.find(
+      (track) => track.nativeStem?.jobId === jobId && track.nativeStem?.stem === stem
+    );
+    if (existing) return existing.id;
+    const api = native();
+    if (!api) throw new Error("Disk-backed tracks require the native Windows app.");
+    // The privileged main process only probes completed verified job output.
+    const measured = await api.probeInferenceStem({ jobId, stem });
+    const meta = audioMetaFromNativeProbe(measured);
+    const ref = { jobId, stem };
+    const url = nativeStemPlaybackUrl(ref);
+    const second = get().tracks.find(
+      (track) => track.nativeStem?.jobId === jobId && track.nativeStem?.stem === stem
+    );
+    if (second) return second.id; // async duplicate registration race
+    const name = displayName.replace(/[\\/\\:<>|?*]/g, "_").slice(0, 250);
+    const ext = name.toLowerCase().endsWith(".flac") ? "flac"
+      : name.toLowerCase().endsWith(".mp3") ? "mp3" : "wav";
+    const type = ext === "flac" ? "audio/flac" : ext === "mp3" ? "audio/mpeg" : "audio/wav";
+    const track: AudioTrack = {
+      id: uuid(),
+      name,
+      size: measured.sizeBytes,
+      mime: type,
+      addedAt: Date.now(),
+      status: "ready",
+      // No audio bytes are loaded into this zero-byte reference. The file
+      // is intentionally not used for native processing or browser decoding.
+      file: new File([], name, { type }),
+      nativeStem: ref,
+      url,
+      meta,
+    };
+    set((state) => ({ tracks: [...state.tracks, track] }));
+    return track.id;
+  },
   addFiles: (files) => {
     const incoming = Array.from(files);
     if (incoming.length === 0) return;
@@ -105,6 +148,30 @@ export const useTracks = create<TracksStore>((set, get) => ({
   retryTrack: (id) => {
     const track = get().tracks.find((t) => t.id === id);
     if (!track || track.status === "checking") return;
+    if (track.nativeStem) {
+      const ref = track.nativeStem;
+      const api = native();
+      if (!api) return;
+      set((state) => ({
+        tracks: state.tracks.map((entry) => entry.id === id
+          ? { ...entry, status: "checking" } : entry),
+      }));
+      void api.probeInferenceStem(ref).then((measured) => {
+        const meta = audioMetaFromNativeProbe(measured);
+        set((state) => ({
+          tracks: state.tracks.map((entry) => entry.id === id && entry.nativeStem === ref
+            ? { ...entry, status: "ready", meta, error: undefined } : entry),
+        }));
+      }).catch(() => {
+        set((state) => ({
+          tracks: state.tracks.map((entry) => entry.id === id && entry.nativeStem === ref
+            ? { ...entry, status: "error",
+                error: { code: "MISSING_FILE", message: "Verified stem is no longer available. Rerun separation." } }
+            : entry),
+        }));
+      });
+      return;
+    }
     if (track.file.size === 0) {
       toast.error("Original media unavailable", { description: "Re-import the original audio file to restore this track." });
       return;
@@ -118,14 +185,14 @@ export const useTracks = create<TracksStore>((set, get) => ({
   removeTrack: (id) => {
     const track = get().tracks.find((t) => t.id === id);
     if (track) {
-      URL.revokeObjectURL(track.url);
+      if (track.url.startsWith("blob:")) URL.revokeObjectURL(track.url);
       dropPeaks(id);
     }
     set((s) => ({ tracks: s.tracks.filter((t) => t.id !== id) }));
   },
   clearAll: () => {
     for (const t of get().tracks) {
-      URL.revokeObjectURL(t.url);
+      if (t.url.startsWith("blob:")) URL.revokeObjectURL(t.url);
       dropPeaks(t.id);
     }
     set({ tracks: [] });

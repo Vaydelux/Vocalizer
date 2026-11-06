@@ -38,7 +38,8 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
-import { useTracks, MAX_IMPORT_BYTES } from "@/lib/studio/store-tracks";
+import { useTracks } from "@/lib/studio/store-tracks";
+import { stemFilenameFromPublishedPath } from "@/lib/studio/native-stem-track";
 import { useUi } from "@/lib/studio/store-ui";
 import { useSettings } from "@/lib/studio/store-settings";
 import { useMixer } from "@/lib/studio/store-mixer";
@@ -247,34 +248,18 @@ export function SplitterView() {
       for (const item of completedStems.result.stemFiles) {
         const stemName = item.stem;
         if (!missing.has(stemName)) continue;
-        const url = `las://renderer/__stem-audio/${encodeURIComponent(jobId)}/${stemName}`;
         try {
-          const resp = await fetch(url);
-          if (!resp.ok) throw new Error("The completed stem is no longer available.");
-          const size = Number(resp.headers.get("content-length") ?? "0");
-          if (size > MAX_IMPORT_BYTES) {
-            throw new Error("Stem is larger than the in-memory import limit; use the saved file.");
+          if (!isNative()) {
+            throw new Error("File-backed stem mixer import requires the native application.");
           }
-          const blob = await resp.blob();
-          if (blob.size === 0 || blob.size > MAX_IMPORT_BYTES) {
-            throw new Error("Stem is empty or exceeds the import limit.");
+          const displayName = stemFilenameFromPublishedPath(item.path);
+          // Register a verified file-backed source, not a copy of audio bytes.
+          const createdId = await useTracks.getState().addNativeStem(jobId, stemName, displayName);
+          if (!useMixer.getState().lanes.some((lane) => lane.trackId === createdId)) {
+            addLane(createdId);
           }
-          const ext = item.path.toLowerCase().endsWith(".flac") ? "flac"
-            : item.path.toLowerCase().endsWith(".mp3") ? "mp3" : "wav";
-          const mime = ext === "flac" ? "audio/flac" : ext === "mp3" ? "audio/mpeg" : "audio/wav";
-          const name = track.name.replace(/\.[^/.]+$/, "");
-          const stemFile = new File([blob], `${name}_${stemName}.${ext}`, { type: mime });
-          const oldIds = new Set(useTracks.getState().tracks.map((t) => t.id));
-          // Track registration is synchronous; metadata probing continues in
-          // the background. Avoid matching a previously imported file by name.
-          useTracks.getState().addFiles([stemFile]);
-          const created = useTracks.getState().tracks.find(
-            (t) => !oldIds.has(t.id) && t.name === stemFile.name
-          );
-          if (!created) throw new Error("The stem was rejected or already imported.");
-          addLane(created.id);
-          if (!useMixer.getState().lanes.some((lane) => lane.trackId === created.id)) {
-            throw new Error("Could not create a mixer lane for this stem.");
+          if (!useMixer.getState().lanes.some((lane) => lane.trackId === createdId)) {
+            throw new Error("Mixer could not accept the new native stem lane.");
           }
           addedStems.push(stemName);
         } catch (error) {
@@ -293,7 +278,7 @@ export function SplitterView() {
       setView("mixer");
     } else if (addedStems.length > 0) {
       toast.warning(`Imported ${addedStems.length} stem(s); ${remaining.length} need retry`, {
-        description: "Use Retry Missing Stems to import only the remaining outputs.",
+        description: "Use Retry Missing Stems; audio stays on disk and is not copied into renderer memory.",
       });
     } else {
       toast.error("No additional stems could be imported; completed files remain on disk.");
@@ -563,7 +548,7 @@ export function SplitterView() {
                         Auto-route to Multi-Track Mixer
                       </div>
                       <div className="text-[11px] text-muted-foreground mt-0.5">
-                        Automatically import completed stems once per job, with volume, pan and DSP controls.
+                        Automatically register verified, disk-backed stems with volume, pan and DSP controls.
                       </div>
                     </div>
                   </label>

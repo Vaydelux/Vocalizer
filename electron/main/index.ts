@@ -137,11 +137,16 @@ function createWindow(): void {
             hasBridge: boolean; hasRenderer: boolean;
             hasFfmpeg: boolean; hasWorker: boolean; nativeAudioVerified: boolean;
             nativeMicrophoneMixVerified: boolean;
+            protectedStemProbeVerified: boolean;
           } = await mainWindow!.webContents.executeJavaScript(`(async () => {
             const bridge = window.studio;
             if (!bridge || bridge.isNative !== true) {
-              return { hasBridge: false, hasRenderer: false, hasFfmpeg: false, hasWorker: false, nativeAudioVerified: false, nativeMicrophoneMixVerified: false };
+              return { hasBridge: false, hasRenderer: false, hasFfmpeg: false, hasWorker: false, nativeAudioVerified: false, nativeMicrophoneMixVerified: false, protectedStemProbeVerified: false };
             }
+            const protectedStemProbeVerified =
+              typeof bridge.probeInferenceStem === "function" &&
+              await bridge.probeInferenceStem({jobId:"windows-smoke-unregistered",stem:"Vocals"})
+                .then(() => false, () => true);
             const system = await bridge.systemInfo();
             const inference = await bridge.inferenceStatus();
             const fixture = ${JSON.stringify(fixture)};
@@ -174,13 +179,15 @@ function createWindow(): void {
               nativeAudioVerified: source.duration > 1 &&
                 result.verified === true && result.sizeBytes > 0 &&
                 output.duration > 0.5 && output.duration < 1,
+              protectedStemProbeVerified,
               nativeMicrophoneMixVerified: staged.staged === true && mixed.verified === true &&
                 mixed.sizeBytes > 0 && mixMeta.duration > 1.5 &&
                 discarded.discarded === false
             };
           })()`, true);
           if (!result.hasBridge || !result.hasRenderer || !result.hasFfmpeg || !result.hasWorker ||
-              !result.nativeAudioVerified || !result.nativeMicrophoneMixVerified) {
+              !result.nativeAudioVerified || !result.nativeMicrophoneMixVerified ||
+              !result.protectedStemProbeVerified) {
             throw new Error("Packaged renderer, preload, FFmpeg or worker unavailable: " + JSON.stringify(result));
           }
           console.log("SMOKE_PASS " + JSON.stringify(result));

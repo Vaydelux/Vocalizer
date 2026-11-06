@@ -35,7 +35,7 @@ export const projectTrackMetaSchema = z.object({
   lengthSamples: z.number().nullable(),
   effectiveBitrateKbps: z.number().nullable(),
   probeNote: z.string(),
-  metaSource: z.enum(["decoded", "element", "none"]),
+  metaSource: z.enum(["decoded", "element", "native-probe", "none"]),
 });
 
 export const projectTrackSchema = z.object({

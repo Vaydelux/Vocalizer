@@ -16,6 +16,7 @@ import type { JobCtx, JobResultFile, ExportFormat, Mp3Bitrate } from "./types";
 import type { AudioTrack } from "./types";
 import type { FfmpegFormat, FfmpegOp } from "./ipc-contracts";
 import { native, isNative } from "./native";
+import { nativeStemInput } from "../../../electron/shared/stem-input";
 import { baseName, sanitizeFileName, timestampSlug } from "./format";
 import { studioError } from "./errors";
 
@@ -32,6 +33,18 @@ function filePath(file: File): string {
     );
   }
   return p;
+}
+
+/** Resolve an AudioTrack to either a browser-picker file path or a verified
+ * completed stem token. The main process expands tokens only from its registry. */
+function trackSourcePath(track: AudioTrack): string {
+  if (track.nativeStem) {
+    if (!isNative()) {
+      throw studioError("CAPABILITY_UNAVAILABLE", "Disk-backed stems require the desktop app.");
+    }
+    return nativeStemInput(track.nativeStem);
+  }
+  return filePath(track.file);
 }
 
 function mapFormat(format: ExportFormat): FfmpegFormat {
@@ -122,7 +135,7 @@ export async function nativeTrimTask(
   const op: FfmpegOp = {
     jobId: ctx.jobId,
     kind: "trim",
-    inputPath: filePath(input.track.file),
+    inputPath: trackSourcePath(input.track),
     startSec: input.startSec,
     endSec: input.endSec,
     lossless: input.lossless,
@@ -143,7 +156,7 @@ export async function nativeJoinTask(
   const op: FfmpegOp = {
     jobId: ctx.jobId,
     kind: "join",
-    inputPaths: input.tracks.map((t) => filePath(t.file)),
+    inputPaths: input.tracks.map((t) => trackSourcePath(t)),
     crossfadeSec: input.crossfadeSec,
     outputFormat: mapFormat(fmt),
     outputPath,
@@ -161,7 +174,7 @@ export async function nativePitchTask(
   const op: FfmpegOp = {
     jobId: ctx.jobId,
     kind: "pitch",
-    inputPath: filePath(input.track.file),
+    inputPath: trackSourcePath(input.track),
     semitones: input.semitones,
     cents: input.cents,
     tempo: input.tempo,
@@ -228,7 +241,7 @@ export async function nativeMixTask(
     const op: FfmpegOp = {
       jobId: ctx.jobId,
       kind: "mix",
-      instrumentalPath: filePath(input.instrumental.file),
+      instrumentalPath: trackSourcePath(input.instrumental),
       vocalPath: micPath,
       vocalStartSec: input.micStartSec,
       outputFormat: mapFormat(fmt),
@@ -267,7 +280,7 @@ export async function nativeMultitrackTask(
   ctx.log(`FFmpeg multitrack mixdown (${input.lanes.length} lanes) → ${outputPath}`);
 
   const mappedLanes = input.lanes.map((l) => ({
-    inputPath: filePath(l.track.file),
+    inputPath: trackSourcePath(l.track),
     offsetSec: l.offsetSec,
     gainDb: l.gainDb,
     pan: l.pan,
