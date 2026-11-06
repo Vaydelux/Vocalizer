@@ -65,14 +65,14 @@ const MODEL_PRESETS: ModelPreset[] = [
     architecture: "demucs",
     defaultStems: ["Vocals", "Drums", "Bass", "Other"],
     description: "Industry-standard 4-stem separation with dedicated drums and bass isolation.",
-    defaultFile: "htdemucs.onnx",
+    defaultFile: "htdemucs.th",
   },
   {
     id: "bs-roformer",
     name: "BS-RoFormer (High-Fidelity 4-Stem)",
     architecture: "bs-roformer",
-    defaultStems: ["Vocals", "Drums", "Bass", "Other"],
-    description: "Rotary Transformer architecture providing state-of-the-art stem bleed suppression.",
+    defaultStems: ["Vocals", "Instrumental"],
+    description: "RoFormer architecture (not yet integrated into the local worker).",
     defaultFile: "bs_roformer_ep_317_sdr_12.97.ckpt",
   },
   {
@@ -80,7 +80,7 @@ const MODEL_PRESETS: ModelPreset[] = [
     name: "MDX-Net HQ 5 (Vocal & Instrumental)",
     architecture: "mdx-net",
     defaultStems: ["Vocals", "Instrumental"],
-    description: "Ultra-fast two-stem vocal extractor with high dynamic range retention.",
+    description: "Checksum-verified two-stem CPU inference. Speed and quality depend on the local system.",
     defaultFile: "UVR-MDX-NET-Inst_HQ_5.onnx",
   },
 ];
@@ -168,6 +168,7 @@ export function SplitterView() {
   }, [refreshRuntime]);
 
   const toggleStem = (stem: ModelStem) => {
+    if (selectedPreset.architecture === "mdx-net") return;
     if (selectedStems.includes(stem)) {
       if (selectedStems.length > 1) {
         setSelectedStems(selectedStems.filter((s) => s !== stem));
@@ -269,7 +270,7 @@ export function SplitterView() {
     <div className="space-y-5">
       <PageHeader
         title="Stem Splitter"
-        description="Deep learning neural audio source separation (Vocals, Drums, Bass, Other). Fully offline, zero data telemetry, enterprise compliant."
+        description="Local MDX-Net vocal/instrumental separation. Four-stem engines are planned but not available in this build."
         actions={
           <div className="flex items-center gap-2">
             <Button
@@ -309,7 +310,7 @@ export function SplitterView() {
           {checkingRuntime ? "Checking inference runtime…" : workerDetected ? "Python inference worker detected" : "Inference worker unavailable"}
         </span>
         <span className="rounded-full border border-border px-2.5 py-1 text-muted-foreground">
-          4-Stem & 2-Stem Neural Architectures
+          2-Stem MDX CPU Available; 4-Stem Planned
         </span>
         <span className="rounded-full border border-border px-2.5 py-1 text-muted-foreground">
           Hardware: CPU / CUDA / DirectML
@@ -384,9 +385,10 @@ export function SplitterView() {
                         variant="ghost"
                         size="sm"
                         className="h-6 text-[10px] px-1.5"
-                        onClick={() => setSelectedStems(["Vocals", "Drums", "Bass", "Other"])}
+                        onClick={() => setSelectedStems(["Vocals", "Instrumental"])}
+                        disabled
                       >
-                        All 4
+                        All 4 (planned)
                       </Button>
                       <Button
                         type="button"
@@ -402,15 +404,16 @@ export function SplitterView() {
                         variant="ghost"
                         size="sm"
                         className="h-6 text-[10px] px-1.5"
-                        onClick={() => setSelectedStems(["Drums", "Bass"])}
+                        onClick={() => setSelectedStems(["Vocals", "Instrumental"])}
+                        disabled
                       >
-                        Rhythm
+                        Rhythm (planned)
                       </Button>
                     </div>
                   </div>
 
                   <div className="grid grid-cols-2 gap-2">
-                    {ALL_STEMS.map((stem) => {
+                    {ALL_STEMS.filter((stem) => selectedPreset.defaultStems.includes(stem)).map((stem) => {
                       const checked = selectedStems.includes(stem);
                       return (
                         <label
@@ -422,6 +425,7 @@ export function SplitterView() {
                           }`}
                         >
                           <Checkbox
+                            disabled={selectedPreset.architecture === "mdx-net"}
                             checked={checked}
                             onCheckedChange={() => toggleStem(stem)}
                           />
@@ -589,7 +593,7 @@ export function SplitterView() {
                     type="button"
                     className="w-full h-10 gap-2 font-medium"
                     onClick={startSeparation}
-                    disabled={!workerDetected || Boolean(activeInference) || checkingRuntime || selectedStems.length === 0 || !localModelPath || selectedPreset.architecture !== "mdx-net"}
+                    disabled={!workerDetected || Boolean(activeInference) || checkingRuntime || selectedStems.length !== 2 || !localModelPath || selectedPreset.architecture !== "mdx-net"}
                   >
                     {activeInference ? (
                       <>
