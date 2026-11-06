@@ -298,7 +298,7 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
     const req = inferenceSeparateRequestSchema.parse(raw);
     let scratch: string | null = null;
     try {
-      const expectedStems = req.architecture === "demucs"
+      const expectedStems: string[] = req.architecture === "demucs"
         ? ["Vocals", "Drums", "Bass", "Other"]
         : ["Vocals", "Instrumental"];
       if (req.requestedStems.length !== expectedStems.length ||
