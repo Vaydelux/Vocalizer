@@ -10,7 +10,12 @@
 import { z } from "zod";
 import { create } from "zustand";
 import { toast } from "sonner";
-import { useTracks } from "./store-tracks";
+import { useTracks, MAX_IMPORT_BYTES } from "./store-tracks";
+import { useMixer, type TrackLane } from "./store-mixer";
+import { dspEffectChainSchema, DEFAULT_EFFECT_CHAIN } from "./dsp-effects";
+import { spatialPositionSchema } from "./spatial-audio";
+import { automationLaneSchema, automationPointSchema } from "./automation";
+import { probeMetadata } from "./decode";
 import { useAnalysis, type StoredBpm, type StoredKey } from "./store-analysis";
 import { useUi, type ViewId } from "./store-ui";
 import { isNative, native } from "./native";
@@ -18,7 +23,8 @@ import { studioError } from "./errors";
 import { sanitizeFileName } from "./format";
 import type { AudioTrack } from "./types";
 
-export const PROJECT_SCHEMA_VERSION = 1;
+export const PROJECT_SCHEMA_VERSION = 2;
+// Stable file family signature. A numeric version distinguishes v1 from v2.
 export const PROJECT_MAGIC_SCHEMA = "vocalizer-project-v1";
 export const AUTOSAVE_LOCAL_STORAGE_KEY = "vocalizer_session_autosave_v1";
 
@@ -48,6 +54,45 @@ export const projectAnalysisSchema = z.object({
   manualKeyByTrack: z.record(z.string(), z.string().nullable()),
 });
 
+export const projectMixerLaneSchema = z.object({
+  id: z.string().min(1).max(128),
+  trackId: z.string().min(1).max(128),
+  name: z.string().max(255),
+  color: z.string().max(180),
+  offsetSec: z.number().finite().min(0).max(86400),
+  gainDb: z.number().finite().min(-96).max(24),
+  pan: z.number().finite().min(-1).max(1),
+  muted: z.boolean(),
+  solo: z.boolean(),
+  effects: dspEffectChainSchema,
+  spatialEnabled: z.boolean().optional(),
+  spatialPosition: spatialPositionSchema.optional(),
+  automationOpen: z.boolean().optional(),
+  automationLanes: z.array(
+    automationLaneSchema.extend({
+      points: z.array(automationPointSchema).max(10000),
+    }),
+  ).max(64).optional(),
+}).strict();
+
+export const projectMixerSchema = z.object({
+  lanes: z.array(projectMixerLaneSchema).max(64),
+  masterGainDb: z.number().finite().min(-96).max(24),
+  masterEffects: dspEffectChainSchema,
+  masterMode: z.enum(["stereo", "binaural", "surround51"]),
+  selectedLaneId: z.string().nullable(),
+});
+
+function emptyProjectMixer(): z.infer<typeof projectMixerSchema> {
+  return {
+    lanes: [],
+    masterGainDb: 0,
+    masterEffects: structuredClone(DEFAULT_EFFECT_CHAIN),
+    masterMode: "stereo",
+    selectedLaneId: null,
+  };
+}
+
 export const projectSchema = z.object({
   schema: z.literal(PROJECT_MAGIC_SCHEMA),
   version: z.literal(PROJECT_SCHEMA_VERSION),
@@ -58,11 +103,16 @@ export const projectSchema = z.object({
   appVersion: z.string().default("0.3.0"),
   tracks: z.array(projectTrackSchema),
   analysis: projectAnalysisSchema,
+  mixer: projectMixerSchema,
   ui: z.object({
     activeView: z.string(),
     preselectedTrackId: z.string().nullable().optional(),
   }),
 });
+
+// Version 1 projects had no mixer snapshot. Validate them explicitly before
+// supplying a safe empty mixer, rather than rejecting earlier user files.
+const legacyProjectSchema = projectSchema.omit({ mixer: true }).extend({ version: z.literal(1) });
 
 export type VocalizerProject = z.infer<typeof projectSchema>;
 export type ProjectTrack = z.infer<typeof projectTrackSchema>;
@@ -109,6 +159,7 @@ export function serializeProject(): VocalizerProject {
   const t = useTracks.getState();
   const a = useAnalysis.getState();
   const u = useUi.getState();
+  const mixer = useMixer.getState();
 
   const tracks: ProjectTrack[] = t.tracks.map((track) => {
     let nativePath: string | undefined = undefined;
@@ -139,6 +190,13 @@ export function serializeProject(): VocalizerProject {
     updatedAt: new Date().toISOString(),
     appVersion: "0.3.0",
     tracks,
+    mixer: {
+      lanes: mixer.lanes,
+      masterGainDb: mixer.masterGainDb,
+      masterEffects: mixer.masterEffects,
+      masterMode: mixer.masterMode,
+      selectedLaneId: mixer.selectedLaneId,
+    },
     analysis: {
       bpmByTrack: a.bpmByTrack,
       keyByTrack: a.keyByTrack,
@@ -163,12 +221,20 @@ export function parseProjectJson(raw: string): VocalizerProject {
     throw studioError("CORRUPT_FILE", `Invalid JSON project file: ${(err as Error).message}`);
   }
 
+  if (parsed && typeof parsed === "object" && "version" in parsed &&
+      (parsed as { version?: unknown }).version === 1) {
+    const legacy = legacyProjectSchema.safeParse(parsed);
+    if (!legacy.success) {
+      throw studioError("CORRUPT_FILE", "Invalid legacy .vocalizer project metadata.");
+    }
+    return { ...legacy.data, version: PROJECT_SCHEMA_VERSION, mixer: emptyProjectMixer() };
+  }
+
   const result = projectSchema.safeParse(parsed);
   if (!result.success) {
     const issue = result.error.issues[0]?.message || "Schema mismatch";
     throw studioError("CORRUPT_FILE", `Unsupported or invalid .vocalizer project format: ${issue}`);
   }
-
   return result.data;
 }
 
@@ -209,7 +275,21 @@ export async function hydrateProject(project: VocalizerProject): Promise<void> {
 
   useTracks.setState({ tracks: restoredTracks });
 
-  // 4. Restore UI
+  // 4. Restore mixer controls, including DSP and automation, but never claim
+  // missing source files are playable. The mixer can only process tracks after
+  // users relink and validate their original media.
+  const trackIds = new Set(restoredTracks.map((track) => track.id));
+  const lanes = project.mixer.lanes.filter((lane) => trackIds.has(lane.trackId)) as TrackLane[];
+  useMixer.setState({
+    lanes,
+    masterGainDb: project.mixer.masterGainDb,
+    masterEffects: structuredClone(project.mixer.masterEffects),
+    masterMode: project.mixer.masterMode,
+    selectedLaneId: lanes.some((lane) => lane.id === project.mixer.selectedLaneId)
+      ? project.mixer.selectedLaneId : null,
+  });
+
+  // 5. Restore UI
   const validViews: ViewId[] = [
     "home",
     "remover",
@@ -236,6 +316,67 @@ export async function hydrateProject(project: VocalizerProject): Promise<void> {
     activeView: targetView,
     preselectedTrackId: project.ui.preselectedTrackId || null,
   });
+}
+
+/**
+ * Reconnect original media after restoring a metadata-only project.
+ *
+ * Browser/Electron sandbox cannot trust stored native paths as File objects.
+ * The user explicitly selects the source files again; each is verified by
+ * filename, exact byte size, decoded metadata and unambiguous matching.
+ */
+export async function relinkProjectTracks(files: readonly File[]): Promise<{
+  linked: number; unresolved: number; rejected: number;
+}> {
+  const projectId = useProject.getState().projectId;
+  const previouslyMissing = useTracks.getState().tracks.filter(
+    (track) => track.status === "error" && track.file.size === 0 && track.size > 0
+  );
+  const available = new Set(files);
+  let linked = 0;
+  let rejected = 0;
+
+  for (const track of previouslyMissing) {
+    if (useProject.getState().projectId !== projectId) break;
+    const candidates = [...available].filter(
+      (file) => file.name === track.name && file.size === track.size &&
+        file.size > 0 && file.size <= MAX_IMPORT_BYTES
+    );
+    if (candidates.length !== 1) {
+      if (candidates.length > 1) rejected++;
+      continue;
+    }
+    const file = candidates[0];
+    available.delete(file);
+    try {
+      const measured = await probeMetadata(file);
+      const previousDuration = track.meta?.duration;
+      if (previousDuration && Number.isFinite(previousDuration) &&
+          Math.abs(measured.duration - previousDuration) > Math.max(0.25, previousDuration * 0.01)) {
+        rejected++;
+        continue;
+      }
+      // Never apply a stale async probe after another project was loaded.
+      if (useProject.getState().projectId !== projectId) break;
+      const live = useTracks.getState().tracks.find((item) => item.id === track.id);
+      if (!live || live.file.size !== 0 || live.status !== "error") continue;
+      const url = URL.createObjectURL(file);
+      useTracks.setState((state) => ({
+        tracks: state.tracks.map((item) => item.id === track.id
+          ? { ...item, file, url, status: "ready", meta: measured,
+              size: file.size, mime: file.type || item.mime, error: undefined }
+          : item),
+      }));
+      linked++;
+    } catch {
+      rejected++;
+    }
+  }
+  if (linked) useProject.getState().markDirty();
+  const unresolved = useTracks.getState().tracks.filter(
+    (track) => track.status === "error" && track.file.size === 0
+  ).length;
+  return { linked, unresolved, rejected };
 }
 
 /* ----------------------------- Export & Import --------------------------------- */
@@ -267,7 +408,7 @@ export async function loadProjectFromFile(file: File): Promise<void> {
     const raw = await file.text();
     const project = parseProjectJson(raw);
     await hydrateProject(project);
-    toast.info("Project metadata loaded", { description: `${project.tracks.length} audio track(s) require re-import before processing.` });
+    toast.info("Project restored", { description: `${project.tracks.length} track(s) restored as metadata; use Relink Audio to enable playback and processing.` });
   } catch (err) {
     const msg = (err as Error).message || "Failed to parse project file";
     toast.error("Failed to load project", { description: msg });
@@ -277,6 +418,9 @@ export async function loadProjectFromFile(file: File): Promise<void> {
 
 export function newProject(): void {
   useTracks.getState().clearAll();
+  useMixer.setState(emptyProjectMixer());
+  useAnalysis.setState({ bpmByTrack: {}, keyByTrack: {}, manualKeyByTrack: {} });
+  useUi.setState({ preselectedTrackId: null });
   useProject.getState().resetProject();
   useUi.getState().setView("home");
   toast.info("Created new project");
