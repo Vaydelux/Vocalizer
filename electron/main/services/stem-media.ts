@@ -31,7 +31,15 @@ export async function streamVerifiedStem(request: Request, approvedPath: string)
   try {
     handle = await fs.promises.open(approvedPath, "r");
     const stat = await handle.stat();
-    if (!stat.isFile() || !Number.isSafeInteger(stat.size) || stat.size < 1) {
+    // Close the pathname-swap window between the completed-stem registry
+    // lookup and opening this handle. Serve only the same regular, unlinked
+    // file currently registered at the approved absolute pathname.
+    const named = await fs.promises.lstat(approvedPath);
+    const real = await fs.promises.realpath(approvedPath);
+    if (!stat.isFile() || !named.isFile() || named.isSymbolicLink() ||
+        real !== approvedPath || stat.dev !== named.dev ||
+        stat.ino !== named.ino || stat.size !== named.size ||
+        !Number.isSafeInteger(stat.size) || stat.size < 1) {
       await handle.close();
       return new Response("Not found", { status: 404 });
     }
