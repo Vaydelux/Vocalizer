@@ -50,6 +50,24 @@ async function run(): Promise<void> {
       await file.close();
     }
 
+    // Verify native HEAD and unsatisfiable range semantics without reading
+    // the 512 MiB body. These controls are excluded from timed throughput.
+    const controlUrl = "https://renderer.local/__stem-audio/benchmark/Vocals";
+    const head = await streamVerifiedStem(new Request(controlUrl, {
+      method: "HEAD", headers: { Range: "bytes=0-63" },
+    }), filename);
+    if (head.status !== 206 || head.body !== null ||
+        head.headers.get("Content-Range") !== `bytes 0-63/${FIXTURE_BYTES}`) {
+      throw new Error("Native HEAD byte-range validation failed.");
+    }
+    const unsatisfiable = await streamVerifiedStem(new Request(controlUrl, {
+      headers: { Range: `bytes=${FIXTURE_BYTES}-` },
+    }), filename);
+    if (unsatisfiable.status !== 416 ||
+        unsatisfiable.headers.get("Content-Range") !== `bytes */${FIXTURE_BYTES}`) {
+      throw new Error("Native 416 byte-range validation failed.");
+    }
+
     // Deliberately record a *post-setup* baseline to exclude fixture creation.
     const baselineRssBytes = process.memoryUsage().rss;
     peakRssBytes = baselineRssBytes;
