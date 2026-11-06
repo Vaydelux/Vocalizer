@@ -227,7 +227,7 @@ const WavePlayerImpl: ForwardRefRenderFunction<WavePlayerHandle, Props> = (
       audioRef.current = null;
       peaksRef.current = null;
     };
-  }, [track.id]);
+  }, [track.id, track.url]); // Relinked project tracks preserve ID but receive a new media URL.
 
   /* ------------------------------ canvas rendering --------------------------- */
   const draw = useCallback(() => {
