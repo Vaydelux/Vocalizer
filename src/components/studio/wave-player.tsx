@@ -19,6 +19,7 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useMemo,
   useRef,
   useState,
   type ForwardRefRenderFunction,
@@ -45,6 +46,7 @@ import { Slider } from "@/components/ui/slider";
 import { useSettings } from "@/lib/studio/store-settings";
 import { cachePeaks, computePeaks, getCachedPeaks, type Peaks } from "@/lib/studio/peaks";
 import { decodeFile } from "@/lib/studio/decode";
+import { MAX_WAVEFORM_RASTER_PX, planWaveformViewport, waveformTimeAtPointer } from "@/lib/studio/waveform-viewport";
 import { mayComputeFullWaveform, shouldPreloadMetadataOnly } from "@/lib/studio/waveform-policy";
 import { formatTime } from "@/lib/studio/format";
 import type { AudioTrack } from "@/lib/studio/types";
@@ -94,7 +96,6 @@ const WavePlayerImpl: ForwardRefRenderFunction<WavePlayerHandle, Props> = (
   const peaksRef = useRef<Peaks | null>(null);
   const regionRef = useRef<RegionRange | null>(null);
   const loopRef = useRef(false);
-  const zoomRef = useRef<number>(FIT_ZOOM);
   const rafRef = useRef<number>(0);
   const dragRef = useRef<{ active: boolean; startX: number; moved: boolean } | null>(null);
 
@@ -109,6 +110,10 @@ const WavePlayerImpl: ForwardRefRenderFunction<WavePlayerHandle, Props> = (
   const [error, setError] = useState<string | null>(null);
   const [zoom, setZoom] = useState<number>(FIT_ZOOM);
   const [width, setWidth] = useState(800);
+  const viewport = useMemo(
+    () => planWaveformViewport(duration, width, zoom),
+    [duration, width, zoom],
+  );
 
   /* --------------------------- canvas size tracking -------------------------- */
   useEffect(() => {
@@ -231,16 +236,20 @@ const WavePlayerImpl: ForwardRefRenderFunction<WavePlayerHandle, Props> = (
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    const dpr = window.devicePixelRatio || 1;
-    const pxPerSec = zoomRef.current || (width > 0 && duration > 0 ? width / duration : 1);
-    const cssW = Math.max(width, Math.ceil(duration * pxPerSec));
+    // The bitmap covers only the visible scrolling viewport, never the
+    // entire (possibly multi-million-pixel) recording timeline.
+    const cssW = viewport.viewportWidth;
     const cssH = height;
-    canvas.width = Math.floor(cssW * dpr);
-    canvas.height = Math.floor(cssH * dpr);
+    const requestedDpr = Math.min(window.devicePixelRatio || 1, 2);
+    const rasterScale = Math.max(0.01, Math.min(requestedDpr, MAX_WAVEFORM_RASTER_PX / cssW));
+    canvas.width = Math.max(1, Math.ceil(cssW * rasterScale));
+    canvas.height = Math.max(1, Math.ceil(cssH * rasterScale));
     canvas.style.width = `${cssW}px`;
     canvas.style.height = `${cssH}px`;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.setTransform(rasterScale, 0, 0, rasterScale, 0, 0);
     ctx.clearRect(0, 0, cssW, cssH);
+    const pxPerSec = viewport.pixelsPerSecond;
+    const scrollX = scrollRef.current?.scrollLeft ?? 0;
 
     // Mid line
     ctx.fillStyle = WAVE_COLOR;
@@ -250,7 +259,7 @@ const WavePlayerImpl: ForwardRefRenderFunction<WavePlayerHandle, Props> = (
       const bucketsPerPixel = bucketsPerSec / pxPerSec;
       const chCount = peaks.channels.length;
       for (let x = 0; x < cssW; x++) {
-        const tCenter = x / pxPerSec;
+        const tCenter = (x + scrollX) / pxPerSec;
         const bucketCenter = tCenter * bucketsPerSec;
         let min = 0;
         let max = 0;
@@ -296,7 +305,7 @@ const WavePlayerImpl: ForwardRefRenderFunction<WavePlayerHandle, Props> = (
     // Region overlay
     const r = regionRef.current;
     if (r && duration > 0) {
-      const rx = r.start * pxPerSec;
+      const rx = r.start * pxPerSec - scrollX;
       const rw = (r.end - r.start) * pxPerSec;
       ctx.fillStyle = "rgba(139, 92, 246, 0.18)";
       ctx.fillRect(rx, 0, rw, cssH);
@@ -314,11 +323,11 @@ const WavePlayerImpl: ForwardRefRenderFunction<WavePlayerHandle, Props> = (
     const audio = audioRef.current;
     const t = audio ? audio.currentTime : 0;
     if (t > 0 && duration > 0) {
-      const px = t * pxPerSec;
+      const px = t * pxPerSec - scrollX;
       ctx.fillStyle = "#a78bfa";
       ctx.fillRect(px, 0, 2, cssH);
     }
-  }, [width, height, duration]);
+  }, [viewport, height, duration]);
 
   // Redraw on state/data changes.
   useEffect(() => {
@@ -415,13 +424,11 @@ const WavePlayerImpl: ForwardRefRenderFunction<WavePlayerHandle, Props> = (
     setZoom((z) => {
       const base = z === FIT_ZOOM && duration > 0 && width > 0 ? width / duration : z || 20;
       const next = clamp(base * (dir === 1 ? 1.6 : 1 / 1.6), 6, 400);
-      zoomRef.current = next;
       return next;
     });
   }, [duration, width]);
 
   const fitZoom = useCallback(() => {
-    zoomRef.current = FIT_ZOOM;
     setZoom(FIT_ZOOM);
   }, []);
 
@@ -448,10 +455,9 @@ const WavePlayerImpl: ForwardRefRenderFunction<WavePlayerHandle, Props> = (
       const rect = canvas.getBoundingClientRect();
       // The canvas rectangle already reflects horizontal scrolling.
       const x = clientX - rect.left;
-      const pxPerSec = zoomRef.current || (width > 0 && duration > 0 ? width / duration : 1);
-      return clamp(x / pxPerSec, 0, duration);
+      return waveformTimeAtPointer(x, scroll.scrollLeft, duration, viewport);
     },
-    [width, duration]
+    [duration, viewport]
   );
 
   const onPointerDown = useCallback(
@@ -579,18 +585,18 @@ const WavePlayerImpl: ForwardRefRenderFunction<WavePlayerHandle, Props> = (
   );
 
   const VolIcon = muted || volume === 0 ? VolumeX : volume < 0.5 ? Volume1 : Volume2;
-  void zoom;
 
   return (
     <div ref={playerRef} className={cn("rounded-xl border border-border bg-card", className)}>
       <div className="relative px-4 pt-4">
-        <div ref={scrollRef} className="studio-scroll relative w-full overflow-x-auto overflow-y-hidden" style={{ height }}>
+        <div ref={scrollRef} className="studio-scroll relative w-full overflow-x-auto overflow-y-hidden" style={{ height }} onScroll={draw}>
+          <div className="relative" style={{ width: viewport.timelineWidth, height }}>
           <canvas
             ref={canvasRef}
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
-            className="block touch-none cursor-pointer"
+            className="sticky left-0 block touch-none cursor-pointer"
             role="slider"
             aria-label="Waveform — click to seek, drag to select a region"
             aria-valuemin={0}
@@ -612,6 +618,7 @@ const WavePlayerImpl: ForwardRefRenderFunction<WavePlayerHandle, Props> = (
             }}
             style={{ height }}
           />
+          </div>
         </div>
         {!ready && !error && (
           <div className="absolute inset-0 flex items-center justify-center bg-card/70">
