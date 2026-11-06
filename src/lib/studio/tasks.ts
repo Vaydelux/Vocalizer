@@ -18,6 +18,7 @@ import { useAnalysis } from "./store-analysis";
 import { baseName, sanitizeFileName, timestampSlug } from "./format";
 import { studioError } from "./errors";
 import { isNative } from "./native";
+import { hasUsableTrackAudio } from "./native-stem-track";
 import { nativeTrimTask, nativeJoinTask, nativePitchTask, nativeConvertTask, nativeMixTask, nativeMultitrackTask } from "./native-tasks";
 import { buildFfmpegDspFilters, type DspEffectChain } from "./dsp-effects";
 import { buildSpatialAudioFilter, createSpatialPannerNode, type SpatialPosition } from "./spatial-audio";
@@ -351,7 +352,7 @@ export function makeMultitrackTask(input: MultitrackTaskInput) {
   // Protect both renderer and native callers from silently exporting an
   // incomplete mix after project metadata was restored without audio files.
   if (input.lanes.length === 0 || input.lanes.some(({ track }) =>
-    track.status !== "ready" || track.file.size === 0
+    !hasUsableTrackAudio(track)
   )) {
     return async (_ctx: JobCtx): Promise<JobResultFile> => {
       throw studioError("MISSING_FILE", "One or more mixer tracks are unavailable. Relink and validate source media before exporting.");

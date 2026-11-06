@@ -36,6 +36,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useMixer, isLaneAudible, type TrackLane } from "@/lib/studio/store-mixer";
 import { useTracks, getTrackById } from "@/lib/studio/store-tracks";
+import { hasUsableTrackAudio } from "@/lib/studio/native-stem-track";
 import { useJobs } from "@/lib/studio/store-jobs";
 import { makeMultitrackTask } from "@/lib/studio/tasks";
 import { MixerChannelStrip } from "@/components/studio/mixer-channel-strip";
@@ -103,7 +104,7 @@ export function MixerView() {
 
     const missingLanes = audibleLanes.filter((lane) => {
       const track = getTrackById(lane.trackId);
-      return !track || track.status !== "ready" || track.file.size === 0;
+      return !track || !hasUsableTrackAudio(track);
     });
     if (missingLanes.length > 0) {
       toast.error("Mixdown blocked: original audio is missing", {
