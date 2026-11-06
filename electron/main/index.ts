@@ -17,7 +17,7 @@ import { app, BrowserWindow, shell, Menu, protocol, net } from "electron";
 import * as path from "node:path";
 import * as fs from "node:fs";
 import { pathToFileURL } from "node:url";
-import { registerIpcHandlers, resolveCompletedStemForPlayback } from "./ipc";
+import { registerIpcHandlers, resolveCompletedStemForPlayback, registerSmokeStemForAcceptance } from "./ipc";
 import { cleanupOrphanedRecordings } from "./services/recording-staging";
 import { cleanupInferenceScratch } from "./services/inference-outputs";
 import { shutdownWorkerImmediately } from "./services/inference-worker";
@@ -135,11 +135,13 @@ function createWindow(): void {
           // bridge without requiring a physical audio device on CI.
           const recordedBase64 = fs.readFileSync(micFixture).toString("base64");
           if (recordedBase64.length > 1_000_000) throw new Error("Smoke mic fixture is too large.");
+          await registerSmokeStemForAcceptance(fixture);
           const result: {
             hasBridge: boolean; hasRenderer: boolean;
             hasFfmpeg: boolean; hasWorker: boolean; nativeAudioVerified: boolean;
             nativeMicrophoneMixVerified: boolean;
             protectedStemProbeVerified: boolean;
+            nativeStemRangeVerified: boolean; nativeStemSeekVerified: boolean;
           } = await mainWindow!.webContents.executeJavaScript(`(async () => {
             const bridge = window.studio;
             if (!bridge || bridge.isNative !== true) {
@@ -149,6 +151,54 @@ function createWindow(): void {
               typeof bridge.probeInferenceStem === "function" &&
               await bridge.probeInferenceStem({jobId:"windows-smoke-unregistered",stem:"Vocals"})
                 .then(() => false, () => true);
+            // Exercise the actual packaged las:// handler from Chromium.
+            // The source is a synthetic WAV registered privately by main.
+            const mediaUrl = "las://renderer/__stem-audio/windows-smoke-media/Vocals";
+            const smokeMeta = await bridge.probeInferenceStem({
+              jobId: "windows-smoke-media", stem: "Vocals",
+            });
+            const mediaResponse = await fetch(mediaUrl, {
+              headers: { Range: "bytes=100-199" },
+              cache: "no-store",
+            });
+            const mediaRange = new Uint8Array(await mediaResponse.arrayBuffer());
+            const nativeStemRangeVerified =
+              mediaResponse.status === 206 &&
+              mediaResponse.headers.get("content-range") ===
+                "bytes 100-199/" + smokeMeta.sizeBytes &&
+              mediaRange.byteLength === 100 &&
+              mediaResponse.headers.get("content-length") === "100";
+            // Decode just enough to load metadata and seek. No autoplay or
+            // microphone permissions are needed to check media navigation.
+            const nativeStemSeekVerified = await new Promise((resolve) => {
+              const player = new Audio();
+              let settled = false;
+              const finish = (passed) => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(timeout);
+                player.pause();
+                player.removeAttribute("src");
+                player.load();
+                resolve(passed);
+              };
+              const timeout = setTimeout(() => finish(false), 8000);
+              player.addEventListener("loadedmetadata", () => {
+                if (!Number.isFinite(player.duration) || player.duration < 1.5) {
+                  finish(false);
+                  return;
+                }
+                try { player.currentTime = 1; }
+                catch { finish(false); }
+              }, { once: true });
+              player.addEventListener("seeked", () => {
+                finish(Math.abs(player.currentTime - 1) < 0.25);
+              }, { once: true });
+              player.addEventListener("error", () => finish(false), { once: true });
+              player.preload = "metadata";
+              player.src = mediaUrl;
+              player.load();
+            });
             const system = await bridge.systemInfo();
             const inference = await bridge.inferenceStatus();
             const fixture = ${JSON.stringify(fixture)};
@@ -182,6 +232,8 @@ function createWindow(): void {
                 result.verified === true && result.sizeBytes > 0 &&
                 output.duration > 0.5 && output.duration < 1,
               protectedStemProbeVerified,
+              nativeStemRangeVerified,
+              nativeStemSeekVerified,
               nativeMicrophoneMixVerified: staged.staged === true && mixed.verified === true &&
                 mixed.sizeBytes > 0 && mixMeta.duration > 1.5 &&
                 discarded.discarded === false
@@ -189,7 +241,8 @@ function createWindow(): void {
           })()`, true);
           if (!result.hasBridge || !result.hasRenderer || !result.hasFfmpeg || !result.hasWorker ||
               !result.nativeAudioVerified || !result.nativeMicrophoneMixVerified ||
-              !result.protectedStemProbeVerified) {
+              !result.protectedStemProbeVerified || !result.nativeStemRangeVerified ||
+              !result.nativeStemSeekVerified) {
             throw new Error("Packaged renderer, preload, FFmpeg or worker unavailable: " + JSON.stringify(result));
           }
           console.log("SMOKE_PASS " + JSON.stringify(result));

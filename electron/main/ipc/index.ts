@@ -122,6 +122,23 @@ const completedFfmpegOutputs = new Map<string, string>();
 const stagedRecordings = new Map<string, string>();
 const ALLOWED_STEMS = new Set(["Vocals", "Instrumental", "Drums", "Bass", "Guitar", "Piano", "Other"]);
 
+/** Packaged acceptance only: register a *synthetic* WAV fixture from main.
+ * This is not an IPC endpoint or a renderer filesystem capability. Normal
+ * application sessions cannot use this method.
+ */
+export async function registerSmokeStemForAcceptance(selectedPath: string): Promise<void> {
+  if (!app.isPackaged || !process.argv.includes("--vocalizer-smoke-test")) {
+    throw studioError("PERMISSION_DENIED", "Smoke fixture registration is disabled.");
+  }
+  const resolved = await fs.promises.realpath(selectedPath);
+  const info = await fs.promises.lstat(resolved);
+  if (!info.isFile() || info.isSymbolicLink() || info.size < 100 ||
+      path.extname(resolved).toLowerCase() !== ".wav") {
+    throw studioError("INPUT_INVALID", "Smoke fixture is not a usable local WAV.");
+  }
+  completedInferenceStems.set("windows-smoke-media", new Map([["Vocals", resolved]]));
+}
+
 /** Playback is restricted to exact paths already verified by the main process.
  * This API is never exposed through the preload bridge. */
 export async function resolveCompletedStemForPlayback(jobId: string, stem: string): Promise<string | null> {
