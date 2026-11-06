@@ -8,7 +8,8 @@
  */
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { FolderOpen, Save, PlusCircle, Search, Edit2, Check, AlertCircle, ShieldCheck } from "lucide-react";
+import { FolderOpen, Save, PlusCircle, Search, Edit2, Check, AlertCircle, ShieldCheck, Link2 } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -19,7 +20,10 @@ import {
   newProject,
   saveAutosaveSession,
   restoreAutosaveSession,
+  relinkProjectTracks,
 } from "@/lib/studio/project";
+import { useMixer } from "@/lib/studio/store-mixer";
+import { useAnalysis } from "@/lib/studio/store-analysis";
 import { useTracks } from "@/lib/studio/store-tracks";
 import { CommandPalette } from "./command-palette";
 import { ComplianceModal } from "./compliance-modal";
@@ -35,6 +39,9 @@ export function ProjectBar() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [complianceOpen, setComplianceOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const relinkInputRef = useRef<HTMLInputElement>(null);
+  const [isRelinking, setIsRelinking] = useState(false);
+  const missingTrackCount = tracks.filter((t) => t.status === "error" && t.file.size === 0).length;
 
   // Restore autosaved session once on mount if empty
   useEffect(() => {
@@ -50,6 +57,23 @@ export function ProjectBar() {
     }, 1200);
     return () => clearTimeout(timer);
   }, [tracks, projectTitle, isDirty]);
+
+  // Mixer and analysis changes are included in autosave, not only track and
+  // title changes. Mark the session dirty until the user saves it explicitly.
+  useEffect(() => {
+    let pending: ReturnType<typeof setTimeout> | undefined;
+    const changed = () => {
+      useProject.getState().markDirty();
+      if (pending) clearTimeout(pending);
+      pending = setTimeout(saveAutosaveSession, 1200);
+    };
+    const stopMixer = useMixer.subscribe(changed);
+    const stopAnalysis = useAnalysis.subscribe(changed);
+    return () => {
+      stopMixer(); stopAnalysis();
+      if (pending) clearTimeout(pending);
+    };
+  }, []);
 
   // Global Ctrl+K / Cmd+K and Ctrl+S / Cmd+S listeners
   useEffect(() => {
@@ -86,6 +110,29 @@ export function ProjectBar() {
     }
   };
 
+  const handleRelinkFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const selected = Array.from(event.target.files ?? []);
+    event.target.value = "";
+    if (!selected.length || isRelinking) return;
+    setIsRelinking(true);
+    void relinkProjectTracks(selected)
+      .then(({ linked, unresolved, rejected }) => {
+        if (linked > 0) {
+          toast.success(`Relinked ${linked} audio track(s)`, {
+            description: unresolved ? `${unresolved} still missing. Select the matching originals to continue.` : "All project audio is now available.",
+          });
+        } else {
+          toast.warning("No matching project audio could be relinked", {
+            description: rejected ? `${rejected} files did not match expected audio metadata.` : "Select the original audio files with matching names and file sizes.",
+          });
+        }
+      })
+      .catch((error) => toast.error("Could not relink audio", {
+        description: error instanceof Error ? error.message : "Unexpected file validation error.",
+      }))
+      .finally(() => setIsRelinking(false));
+  };
+
   return (
     <div className="flex h-12 w-full shrink-0 items-center justify-between border-b border-border bg-card/50 px-3 text-sm">
       {/* Hidden file input for opening projects */}
@@ -95,6 +142,15 @@ export function ProjectBar() {
         accept=".vocalizer,.json"
         className="hidden"
         onChange={handleOpenFileChange}
+      />
+
+      <input
+        ref={relinkInputRef}
+        type="file"
+        accept="audio/*,.wav,.flac,.mp3,.m4a,.aac,.ogg,.opus,.aiff"
+        multiple
+        className="hidden"
+        onChange={handleRelinkFileChange}
       />
 
       {/* Left: Project title & status */}
@@ -164,6 +220,19 @@ export function ProjectBar() {
 
       {/* Right: Project actions */}
       <div className="flex items-center gap-1">
+        {missingTrackCount > 0 && (
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 gap-1 px-2 text-xs text-amber-600 dark:text-amber-400"
+            disabled={isRelinking}
+            onClick={() => relinkInputRef.current?.click()}
+            title={`${missingTrackCount} original audio file(s) must be relinked before processing`}
+          >
+            <Link2 className="h-3.5 w-3.5" />
+            {isRelinking ? "Verifying…" : `Relink Audio (${missingTrackCount})`}
+          </Button>
+        )}
         <Button
           size="sm"
           variant="ghost"
