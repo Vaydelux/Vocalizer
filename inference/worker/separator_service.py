@@ -53,8 +53,14 @@ class SeparatorService:
     ) -> tuple[list[dict[str, Any]], str, str, bool]:
         if not os.path.isfile(input_path):
             raise WorkerError("inference-failed", f"Input file not found: {input_path}")
+        if architecture == "demucs":
+            if segment_size is not None or config_path is not None:
+                raise WorkerError("architecture-unsupported", "Demucs uses validated local CPU profiles.")
+            from demucs_service import separate_demucs
+            return separate_demucs(model_id, model_path, input_path, output_dir,
+                                   requested_stems, output_format, device, profile, on_progress)
         if architecture != "mdx-net":
-            raise WorkerError("architecture-unsupported", "Only MDX-Net inference is supported in this preview.")
+            raise WorkerError("architecture-unsupported", "This model architecture is not integrated.")
         if device not in ("cpu", "auto"):
             raise WorkerError("device-unsupported", "This inference worker is CPU-only.")
         # The audio-separator library normally downloads missing checkpoints.

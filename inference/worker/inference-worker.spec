@@ -26,16 +26,26 @@ datas = [
 ]
 datas += collect_data_files("onnxruntime")
 datas += collect_data_files("audio_separator")
+datas += collect_data_files("demucs")
 
 binaries = []
 binaries += collect_dynamic_libs("onnxruntime")
 binaries += collect_dynamic_libs("torch")
+binaries += collect_dynamic_libs("torchaudio")
 
 hiddenimports = [
     "audio_separator",
     "audio_separator.separator",
     "audio_separator.separator.architectures.mdx_separator",
     "onnxruntime",
+    "demucs",
+    "demucs.api",
+    "demucs.audio",
+    "demucs.repo",
+    "demucs.htdemucs",
+    "demucs_service",
+    "torchaudio",
+    "yaml",
     "torch",
     "torchvision",
     "onnx2torch",

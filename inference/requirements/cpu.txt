@@ -12,6 +12,9 @@ audio-separator==0.47.2
 onnxruntime==1.31.1
 torch==2.15.0+cpu
 torchvision==0.29.2+cpu
+# HTDemucs v4 decoding, inference and real audio stem encoding.
+torchaudio==2.15.0+cpu
+demucs==4.0.1
 onnx2torch==1.5.15
 julius>=0.2
 ml_collections
