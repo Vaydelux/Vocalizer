@@ -123,7 +123,7 @@ jobs:
       - name: Verify actual offline HTDemucs four-stem inference on Windows
         if: ${{ github.event_name == 'pull_request' }}
         shell: pwsh
-        timeout-minutes: 15
+        timeout-minutes: 25
         run: |
           # Official checkpoint is downloaded to the ephemeral CI temp folder,
           # hash-checked and never included in the downloadable Vocalizer ZIP.

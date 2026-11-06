@@ -307,6 +307,10 @@ class JobRunner:
             self._job_file = None
         if self.cancelled:
             return  # the cancel handler already emitted the cancelled error
+        if code != 0:
+            # A failed job must not leave half-rendered stems behind, even when
+            # the child reports a structured error and exits with code 1.
+            self._cleanup_partial_outputs()
         if code not in (0, 1):  # 0=success, 1=protocol error emitted by child
             with self.write_lock:
                 emit(ERROR_MSG(self.request_id or "?", "unknown", f"Inference worker process exited with code {code}."))

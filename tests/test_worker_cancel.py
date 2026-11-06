@@ -4,6 +4,7 @@ Uses the real Python parent handler without importing heavy inference packages.
 """
 from pathlib import Path
 import sys
+import tempfile
 import threading
 import unittest
 from unittest.mock import patch
@@ -43,6 +44,47 @@ class CancelTests(unittest.TestCase):
         self.assertEqual(runner.cancel_calls, 1)
         self.assertEqual(responses[0]["code"], "cancelled")
         self.assertEqual(responses[0]["requestId"], "job-1")
+
+    def test_failed_stream_removes_partial_float_but_preserves_existing(self):
+        with tempfile.TemporaryDirectory() as folder:
+            original = Path(folder) / "htdemucs_(Vocals).wav"
+            scratch = Path(folder) / "htdemucs_(Vocals).float.wav"
+            original.write_bytes(b"user-owned")
+            scratch.write_bytes(b"half-written")
+            runner = main.JobRunner()
+            runner.output_dir = folder
+            runner.pre_existing = {original.name}
+            runner.request_id = "broken-job"
+            runner.result_paths = set()
+            runner._job_file = None
+
+            class ExitedChild:
+                def wait(self):
+                    return 1
+
+            runner.proc = ExitedChild()
+            runner.finish(lambda *_: None)
+            self.assertTrue(original.exists())
+            self.assertEqual(original.read_bytes(), b"user-owned")
+            self.assertFalse(scratch.exists())
+
+    def test_successful_child_keeps_reported_completed_output(self):
+        with tempfile.TemporaryDirectory() as folder:
+            result = Path(folder) / "htdemucs_(Vocals).wav"
+            result.write_bytes(b"completed")
+            runner = main.JobRunner()
+            runner.output_dir = folder
+            runner.pre_existing = set()
+            runner.result_paths = {str(result)}
+            runner._job_file = None
+
+            class ExitedChild:
+                def wait(self):
+                    return 0
+
+            runner.proc = ExitedChild()
+            runner.finish(lambda *_: None)
+            self.assertTrue(result.exists())
 
     def test_no_active_job_returns_unknown(self):
         runner = FakeRunner(active=False)

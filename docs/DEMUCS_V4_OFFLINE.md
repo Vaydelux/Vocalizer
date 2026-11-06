@@ -1,7 +1,7 @@
 # Experimental HTDemucs v4 — local four-stem separation
 
-> **Preview only.** The worker and output path are implemented, but real-model
-> Windows acceptance and licensing review are release blockers. CPU inference
+> **Preview only.** Real single-window Windows inference was verified, but
+> long-form chunked inference and licensing review remain release gates. CPU inference
 > can be slow or RAM-intensive; no GPU runtime is currently packaged.
 
 ## Checkpoint provenance and integrity
@@ -63,13 +63,38 @@ RoFormer, DirectML and CUDA are not enabled by this feature.
 
 ## Safety limits during preview
 
-Until a streaming decoder and bounded multi-chunk source reconstruction are
-implemented, this CPU preview accepts recordings **up to 10 minutes** long.
-The input is probed before loading its waveform; longer inputs are rejected
-with a clear message rather than risking an out-of-memory crash.
+The streaming Demucs implementation decodes at most one short window at a time.
+It processes up to **30 minutes of audio**, with an FFprobe input-duration gate,
+free-disk preflight, and output streaming through float WAV scratch files.
+Adjacent chunk cores use a **0.25-second crossfade** with **3 seconds of
+inference context** on both sides. Low Memory uses 8-second cores; Balanced and
+Thorough use 24-second cores. Output files are only finalized after all four
+stem streams have been rendered and verified.
+
+A single final peak gain per stem is measured over the complete float stream
+and applied during final PCM16/PCM24/FLAC/MP3 encoding; this avoids per-chunk
+volume pumping. The application checks sample counts, duration, channels and
+sample rates; failure or cancellation cannot be mistaken for a completed
+four-stem job.
+
+This is a **preview limit**, not an assurance that a 30-minute source will finish
+quickly on every CPU. Outputs require substantial scratch disk space and may
+take many times the source runtime. Users must retain the original file and
+enough temporary storage. Source metadata must have a reliable duration.
+Very long files require future resumable chunk/session orchestration.
 
 Because PyTorch model files use object serialization, the hash-verified model
 is copied into a private one-file repository and the copied bytes are hashed
 **again** before they are deserialized. This mitigates a checkpoint replacement
 race between initial verification and model loading. Neither the worker nor
 Windows CI bundles weights into the user-facing ZIP.
+
+## Long-form acceptance gate
+
+Windows CI runs the actual packaged HTDemucs CPU worker on 3-second and
+9-second stereo test inputs. The 9-second input forces **two 8-second cores**;
+each of the four output files must be 24-bit stereo PCM with the same
+sample-accurate length as the input (within FFprobe reporting tolerance).
+The 3-second test protects single-window behavior and the 9-second test
+protects crossfade continuity. This is a structural test only: perceptual seam
+quality, SDR/SI-SDR and hour-long operation still require real-song testing.
