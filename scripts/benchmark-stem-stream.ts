@@ -50,22 +50,27 @@ async function run(): Promise<void> {
       await file.close();
     }
 
+    // Electron's privileged completed-stem registry only exposes canonical
+    // realpaths. Windows temporary directories can have a differently-cased
+    // or junction-resolved spelling, so mirror production resolution here.
+    const verifiedPath = await fs.realpath(filename);
+
     // Verify native HEAD and unsatisfiable range semantics without reading
     // the 512 MiB body. These controls are excluded from timed throughput.
     const controlUrl = "https://renderer.local/__stem-audio/benchmark/Vocals";
     const head = await streamVerifiedStem(new Request(controlUrl, {
       method: "HEAD", headers: { Range: "bytes=0-63" },
-    }), filename);
+    }), verifiedPath);
     if (head.status !== 206 || head.body !== null ||
         head.headers.get("Content-Range") !== `bytes 0-63/${FIXTURE_BYTES}`) {
-      throw new Error("Native HEAD byte-range validation failed.");
+      throw new Error(`Native HEAD byte-range validation failed: status=${head.status}, body=${head.body !== null}, range=${head.headers.get("Content-Range")}`);
     }
     const unsatisfiable = await streamVerifiedStem(new Request(controlUrl, {
       headers: { Range: `bytes=${FIXTURE_BYTES}-` },
-    }), filename);
+    }), verifiedPath);
     if (unsatisfiable.status !== 416 ||
         unsatisfiable.headers.get("Content-Range") !== `bytes */${FIXTURE_BYTES}`) {
-      throw new Error("Native 416 byte-range validation failed.");
+      throw new Error(`Native 416 byte-range validation failed: status=${unsatisfiable.status}, range=${unsatisfiable.headers.get("Content-Range")}`);
     }
 
     // Deliberately record a *post-setup* baseline to exclude fixture creation.
@@ -87,7 +92,7 @@ async function run(): Promise<void> {
         const request = new Request("https://renderer.local/__stem-audio/benchmark/Vocals", {
           headers: { Range: `bytes=${start}-${end}` },
         });
-        const response = await streamVerifiedStem(request, filename);
+        const response = await streamVerifiedStem(request, verifiedPath);
         if (response.status !== 206 ||
             response.headers.get("Content-Range") !== `bytes ${start}-${end}/${FIXTURE_BYTES}` ||
             response.headers.get("Content-Length") !== String(RANGE_BYTES) ||
