@@ -42,6 +42,7 @@ def main():
     job_path = work / "job.json"
     job_path.write_text(json.dumps(job), encoding="utf-8")
     env = dict(os.environ, LAS_FFPROBE_PATH=str(Path(args.ffprobe).resolve()))
+    env["PATH"] = str(Path(args.ffmpeg).resolve().parent) + os.pathsep + env.get("PATH", "")
     finished = subprocess.run(
         [args.exe, "--job", str(job_path)], env=env,
         capture_output=True, text=True, timeout=420,

@@ -15,6 +15,8 @@ from local_model import DEMUCS_FILENAME
 
 
 class FakeTensor:
+    shape = (2, 44100 * 3)
+
     def detach(self):
         return self
 
@@ -24,6 +26,7 @@ class FakeTensor:
 
 class FakeSeparator:
     samplerate = 44100
+    audio_channels = 2
 
     def __init__(self, **kwargs):
         if kwargs["model"] != "955717e8" or kwargs["device"] != "cpu" or kwargs["repo"] is None:
@@ -65,7 +68,12 @@ class OfflineDemucsTests(unittest.TestCase):
             with (
                 patch.dict(sys.modules, {"demucs": demucs, "demucs.api": api, "demucs.audio": audio}),
                 patch("demucs_service.require_local_demucs_model", return_value=fake_checkpoint),
-                patch("demucs_service.verify_audio_file", side_effect=lambda p: self.assertTrue(Path(p).is_file())),
+                patch("demucs_service.verify_audio_file", side_effect=lambda p, **kwargs: (
+                    self.assertTrue(Path(p).is_file()),
+                    self.assertEqual(kwargs["expected_sample_rate"], 44100),
+                    self.assertEqual(kwargs["expected_channels"], 2),
+                    self.assertAlmostEqual(kwargs["expected_duration"], 3.0),
+                )),
             ):
                 stems, model, device, fallback = separate_demucs(
                     DEMUCS_FILENAME, str(fake_checkpoint), "input.wav", str(out),

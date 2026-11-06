@@ -56,19 +56,27 @@ def separate_demucs(
             jobs=0, progress=False, **PROFILES[profile],
         )
         on_progress(None, "Running Demucs inference")
-        _, sources = separator.separate_audio_file(Path(input_path))
+        original, sources = separator.separate_audio_file(Path(input_path))
     except MemoryError as exc:
         raise WorkerError("out-of-memory", "Not enough RAM for Demucs separation.") from exc
 
     if not isinstance(sources, dict) or set(sources) != {s.lower() for s in FOUR_STEMS}:
         raise WorkerError("inference-failed", "Demucs returned missing or unexpected sources.")
+    expected_frames = original.shape[-1]
+    expected_duration = expected_frames / separator.samplerate
+    if expected_frames <= 0 or expected_duration <= 0:
+        raise WorkerError("inference-failed", "Demucs returned an empty source waveform.")
+    for stem_name, tensor in sources.items():
+        if tensor.shape[-1] != expected_frames or tensor.shape[0] != separator.audio_channels:
+            raise WorkerError("inference-failed", f"Demucs returned an invalid waveform shape for {stem_name}.")
 
     destination = Path(output_dir)
     destination.mkdir(parents=True, exist_ok=True)
     extension = {"wav": ".wav", "wav24": ".wav", "mp3": ".mp3", "flac": ".flac"}[output_format]
     stems: list[dict[str, Any]] = []
     for index, name in enumerate(FOUR_STEMS):
-        result = destination / f"{Path(input_path).stem}_({name})_htdemucs{extension}"
+        # Scratch filenames deliberately exclude user-controlled source names.
+        result = destination / f"htdemucs_({name}){extension}"
         try:
             save_audio(
                 sources[name.lower()].detach().cpu(),
@@ -76,7 +84,11 @@ def separate_demucs(
                 bits_per_sample=24 if output_format == "wav24" else 16,
                 bitrate=320,
             )
-            verify_audio_file(str(result))
+            verify_audio_file(
+                str(result), expected_duration=expected_duration,
+                expected_sample_rate=separator.samplerate,
+                expected_channels=separator.audio_channels,
+            )
         except WorkerError:
             raise
         except Exception as exc:
