@@ -1,26 +1,15 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "@/components/ui/toaster";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
-
 export const metadata: Metadata = {
-  title: "Local Audio Studio",
+  title: "Vocalizer — Local Audio Studio",
   description:
-    "Offline-first, local-only audio studio: import, waveform, cutter, joiner, pitcher, key & BPM, recorder, karaoke. Files never leave the device.",
-  keywords: ["audio", "local-first", "waveform", "cutter", "joiner", "pitch", "BPM", "karaoke"],
+    "Offline-first, enterprise-grade local audio studio: waveform editor, cutter, joiner, pitcher, key & BPM finder, recorder, karaoke, and neural stem separation. Files never leave your computer.",
+  keywords: ["audio", "local-first", "waveform", "cutter", "joiner", "pitch", "BPM", "karaoke", "separation", "stems"],
   authors: [{ name: "Local Audio Studio" }],
   icons: {
-    icon: "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
+    icon: "/logo.svg",
   },
 };
 
@@ -31,9 +20,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className="dark" suppressHydrationWarning>
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-background text-foreground`}
-      >
+      <body className="antialiased bg-background text-foreground min-h-screen">
         {children}
         <Toaster />
       </body>

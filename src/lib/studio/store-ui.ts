@@ -10,6 +10,8 @@ export type ViewId =
   | "key-bpm"
   | "cutter"
   | "joiner"
+  | "mixer"
+  | "batch"
   | "recorder"
   | "karaoke"
   | "models"

@@ -92,12 +92,20 @@ const baseOp = {
   outputPath: z.string().min(1).max(4096),
 } as const;
 
+export const loudnessNormalizeSchema = z.object({
+  targetLufs: z.number().min(-30).max(-10).default(-14),
+  truePeak: z.number().min(-6).max(0).default(-1),
+});
+export type LoudnessNormalizeConfig = z.infer<typeof loudnessNormalizeSchema>;
+
 export const trimOpSchema = z.object({
   ...baseOp,
   kind: z.literal("trim"),
   inputPath: z.string().min(1).max(4096),
   startSec: z.number().min(0).max(24 * 3600),
   endSec: z.number().min(0).max(24 * 3600),
+  lossless: z.boolean().optional(),
+  loudnessNormalize: loudnessNormalizeSchema.optional(),
 });
 export const joinOpSchema = z.object({
   ...baseOp,
@@ -119,6 +127,7 @@ export const convertOpSchema = z.object({
   kind: z.literal("convert"),
   inputPath: z.string().min(1).max(4096),
   sampleRate: z.union([z.literal(44100), z.literal(48000), z.null()]).default(null),
+  loudnessNormalize: loudnessNormalizeSchema.optional(),
 });
 export const mixOpSchema = z.object({
   ...baseOp,
@@ -130,12 +139,32 @@ export const mixOpSchema = z.object({
   instrumentalGainDb: z.number().min(-40).max(40).default(0),
 });
 
+export const multitrackLaneSchema = z.object({
+  inputPath: z.string().min(1).max(4096),
+  offsetSec: z.number().min(0).max(24 * 3600).default(0),
+  gainDb: z.number().min(-60).max(24).default(0),
+  pan: z.number().min(-1).max(1).default(0),
+  filters: z.array(z.string()).optional(),
+});
+export type MultitrackLane = z.infer<typeof multitrackLaneSchema>;
+
+export const multitrackOpSchema = z.object({
+  ...baseOp,
+  kind: z.literal("multitrack"),
+  lanes: z.array(multitrackLaneSchema).min(1).max(32),
+  masterGainDb: z.number().min(-60).max(24).default(0),
+  masterFilters: z.array(z.string()).optional(),
+  loudnessNormalize: loudnessNormalizeSchema.optional(),
+});
+export type MultitrackOp = z.infer<typeof multitrackOpSchema>;
+
 export const ffmpegOpSchema = z.discriminatedUnion("kind", [
   trimOpSchema,
   joinOpSchema,
   pitchOpSchema,
   convertOpSchema,
   mixOpSchema,
+  multitrackOpSchema,
 ]);
 export type FfmpegOp = z.infer<typeof ffmpegOpSchema>;
 

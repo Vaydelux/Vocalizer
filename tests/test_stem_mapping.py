@@ -17,6 +17,16 @@ class StemMappingTests(unittest.TestCase):
             REQUESTED,
         )
 
+    def test_accepts_real_four_stem_names(self):
+        four_stems = ["Vocals", "Drums", "Bass", "Other"]
+        files = [
+            "track_(Vocals)_demucs.wav",
+            "track_(Drums)_demucs.wav",
+            "track_(Bass)_demucs.wav",
+            "track_(Other)_demucs.wav",
+        ]
+        self.assertEqual(match_stems(files, four_stems), four_stems)
+
     def test_duplicate_stems_are_rejected(self):
         with self.assertRaises(WorkerError):
             match_stems(["x_(Vocals)_1.wav", "x_(Vocals)_2.wav"], REQUESTED)

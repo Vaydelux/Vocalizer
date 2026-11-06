@@ -26,6 +26,8 @@ import { useModels } from "@/lib/studio/store-models";
 import { INFERENCE_ADAPTERS } from "@/lib/studio/adapters";
 import { APP_VERSION, APP_MILESTONE } from "@/lib/studio/app-info";
 import { formatBytes } from "@/lib/studio/format";
+import { native, isNative } from "@/lib/studio/native";
+import type { NativeSystemInfo, InferenceStatus } from "@/lib/studio/ipc-contracts";
 
 function parseOs(ua: string): { name: string; version: string } {
   const win = ua.match(/Windows NT ([\d.]+)/);
@@ -70,18 +72,18 @@ export function SystemView() {
   const [audioState, setAudioState] = useState<string>("—");
   const [maxChannels, setMaxChannels] = useState<number | null>(null);
   const [tick, setTick] = useState(0);
-  // Browser-only probes are populated after mount (never during SSR).
   const [recorderMimes, setRecorderMimes] = useState<RecorderMimeSupport[]>([]);
   const [playback, setPlayback] = useState<PlaybackSupport[]>([]);
   const [gpu, setGpu] = useState<{ vendor: string; renderer: string } | null>(null);
   const [os, setOs] = useState<{ name: string; version: string }>({ name: "—", version: "—" });
   const [hwCores, setHwCores] = useState<number | null>(null);
   const [hwMem, setHwMem] = useState<number | null>(null);
+  const [nativeInfo, setNativeInfo] = useState<NativeSystemInfo | null>(null);
+  const [inferenceInfo, setInferenceInfo] = useState<InferenceStatus | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      // Synchronous browser probes (deferred to avoid SSR and render cascades).
       await Promise.resolve();
       if (cancelled) return;
       setRecorderMimes(probeRecorderMimes());
@@ -120,14 +122,54 @@ export function SystemView() {
           setAudioState("unavailable");
         }
       }
+      const api = native();
+      if (api) {
+        try {
+          const [nInfo, infStatus] = await Promise.all([
+            api.systemInfo(),
+            api.inferenceStatus().catch(() => null),
+          ]);
+          if (!cancelled) {
+            setNativeInfo(nInfo);
+            setInferenceInfo(infStatus);
+          }
+        } catch {
+          /* native probe error */
+        }
+      }
     })();
     return () => {
       cancelled = true;
     };
   }, [tick]);
 
-  const hardware: CapabilityItem[] = useMemo(
-    () => [
+  const hardware: CapabilityItem[] = useMemo(() => {
+    if (nativeInfo) {
+      return [
+        {
+          label: "CPU",
+          value: `${nativeInfo.cpuModel} (${nativeInfo.cpuCores} cores)`,
+          available: true,
+        },
+        {
+          label: "Physical memory",
+          value: `${(nativeInfo.totalMemBytes / 1024 ** 3).toFixed(1)} GB total (${(nativeInfo.freeMemBytes / 1024 ** 3).toFixed(1)} GB free)`,
+          available: true,
+        },
+        {
+          label: "GPU",
+          value: gpu ? gpu.renderer : "Not reported",
+          available: !!gpu,
+          detail: gpu ? `Vendor: ${gpu.vendor}. Presence of a GPU does not imply CUDA/DirectML support.` : undefined,
+        },
+        {
+          label: "Storage free (app data)",
+          value: nativeInfo.appDataFreeBytes != null ? formatBytes(nativeInfo.appDataFreeBytes) : "Not reported",
+          available: nativeInfo.appDataFreeBytes != null,
+        },
+      ];
+    }
+    return [
       {
         label: "Logical processors",
         value: hwCores != null ? String(hwCores) : "unknown",
@@ -150,22 +192,47 @@ export function SystemView() {
         value: storage ? `${formatBytes(storage.usage)} of ${formatBytes(storage.quota)} quota` : "Not reported",
         available: !!storage,
       },
-    ],
-    [storage, gpu, hwCores, hwMem]
-  );
+    ];
+  }, [nativeInfo, storage, gpu, hwCores, hwMem]);
 
-  const application: CapabilityItem[] = useMemo(
-    () => [
+  const application: CapabilityItem[] = useMemo(() => {
+    if (nativeInfo) {
+      return [
+        { label: "Application version", value: `v${nativeInfo.appVersion} — ${APP_MILESTONE}`, available: true },
+        { label: "Desktop runtime", value: `Electron ${nativeInfo.electronVersion} · Node ${nativeInfo.nodeVersion} · Chrome ${nativeInfo.chromeVersion}`, available: true },
+        { label: "UI framework", value: "React 19 · Next.js 16 App Router", available: true },
+        { label: "App data path", value: nativeInfo.userDataPath, available: true },
+      ];
+    }
+    return [
       { label: "Application version", value: `v${APP_VERSION} — ${APP_MILESTONE}`, available: true },
       { label: "UI runtime", value: "React 19 · Next.js 16 App Router", available: true },
-      { label: "Electron / Node / Chromium", value: "Electron availability is checked by the Remover and system IPC; this panel does not probe the native host.", available: null },
+      { label: "Electron / Node / Chromium", value: "Web preview (running in browser)", available: false },
       { label: "Processing engine", value: "Web Audio API · WaveSurfer v8 · OfflineAudioContext", available: true },
-    ],
-    []
-  );
+    ];
+  }, [nativeInfo]);
 
-  const audio: CapabilityItem[] = useMemo(
-    () => [
+  const audio: CapabilityItem[] = useMemo(() => {
+    const items: CapabilityItem[] = [];
+    if (nativeInfo) {
+      items.push({
+        label: "Bundled FFmpeg",
+        value: nativeInfo.ffmpegAvailable ? (nativeInfo.ffmpegVersion ? nativeInfo.ffmpegVersion.slice(0, 45) : "Available") : "Not bundled",
+        available: nativeInfo.ffmpegAvailable,
+        detail: nativeInfo.ffmpegPath,
+      });
+      items.push({
+        label: "Bundled FFprobe",
+        value: nativeInfo.ffprobePath !== "not bundled" ? "Available" : "Not bundled",
+        available: nativeInfo.ffprobePath !== "not bundled",
+      });
+      items.push({
+        label: "Rubber Band filter",
+        value: nativeInfo.rubberBandAvailable ? "Supported" : "Not compiled into bundled FFmpeg",
+        available: nativeInfo.rubberBandAvailable,
+      });
+    }
+    items.push(
       { label: "AudioContext state", value: audioState, available: audioState === "running" || audioState === "suspended" },
       { label: "Max output channels", value: maxChannels ? String(maxChannels) : "unknown", available: maxChannels != null },
       {
@@ -185,39 +252,44 @@ export function SystemView() {
         value: playback.map((p) => `${p.label}:${p.support}`).join(" · "),
         available: playback.some((p) => p.support !== "no"),
         detail: "Indicative probe — import validation decodes actual files.",
-      },
-    ],
-    [audioState, maxChannels, recorderMimes, micCount, micPermission, playback]
-  );
+      }
+    );
+    return items;
+  }, [nativeInfo, audioState, maxChannels, recorderMimes, micCount, micPermission, playback]);
 
-  const futureAi: CapabilityItem[] = useMemo(
-    () => [
-      { label: "Python runtime", value: "Not probed — desktop-build capability", available: null },
-      {
-        label: "ONNX Runtime",
-        value: `Not directly probed here — ${INFERENCE_ADAPTERS.filter((a) => a.runtimes.some((r) => r.startsWith("onnxruntime"))).length} ONNX adapter(s) in metadata registry. Check Remover for worker status.`,
-        available: false,
-      },
-      {
-        label: "PyTorch runtime",
-        value: `Not directly probed here — ${INFERENCE_ADAPTERS.filter((a) => a.runtimes.some((r) => r.startsWith("pytorch"))).length} PyTorch adapter(s) in metadata registry.`,
-        available: false,
-      },
-      { label: "CUDA / DirectML / MPS", value: "Not applicable in web preview; GPU presence ≠ AI backend support", available: false },
-      {
-        label: "Registered adapters",
-        value: `${INFERENCE_ADAPTERS.length} adapter contracts (MDX-Net, VR, Demucs, BS-RoFormer, MelBand, Generic ONNX, Custom PyTorch, Custom Safetensors)`,
-        available: false,
-      },
-      {
-        label: "Installed models",
-        value: `${userModels.length} user-registered · built-in slot: ${builtin.status}`,
-        available: false,
-      },
-      { label: "Fallback readiness", value: "No bundled default model. Use Remover to select the separately verified ONNX checkpoint.", available: false },
-    ],
-    [userModels.length, builtin.status]
-  );
+  const futureAi: CapabilityItem[] = useMemo(() => [
+    {
+      label: "Python worker",
+      value: inferenceInfo?.workerAvailable ? "Detected and responsive" : (nativeInfo ? "Worker executable not bundled/started" : "Web preview (desktop only)"),
+      available: !!inferenceInfo?.workerAvailable,
+    },
+    {
+      label: "Inference runtimes",
+      value: inferenceInfo?.runtimes?.length ? inferenceInfo.runtimes.join(", ") : "None detected",
+      available: (inferenceInfo?.runtimes?.length ?? 0) > 0,
+    },
+    {
+      label: "Supported devices",
+      value: inferenceInfo?.devices?.length ? inferenceInfo.devices.map((d) => d.toUpperCase()).join(", ") : "CPU",
+      available: (inferenceInfo?.devices?.length ?? 0) > 0,
+      detail: "Hardware acceleration depends on device drivers and runtime build.",
+    },
+    {
+      label: "Registered adapters",
+      value: `${INFERENCE_ADAPTERS.length} adapter contracts (MDX-Net, VR, Demucs, BS-RoFormer, MelBand, Generic ONNX, Custom PyTorch, Custom Safetensors)`,
+      available: true,
+    },
+    {
+      label: "Installed models",
+      value: `${userModels.length} user-registered · built-in slot: ${builtin.status}`,
+      available: userModels.length > 0,
+    },
+    {
+      label: "Fallback readiness",
+      value: inferenceInfo?.defaultModelInstalled ? "Default model installed" : "No bundled default checkpoint. Select verified ONNX checkpoint in Remover.",
+      available: !!inferenceInfo?.defaultModelInstalled,
+    },
+  ], [nativeInfo, inferenceInfo, userModels.length, builtin.status]);
 
   const copyReport = () => {
     const section = (title: string, items: CapabilityItem[]) =>

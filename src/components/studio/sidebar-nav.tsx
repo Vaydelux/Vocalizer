@@ -5,7 +5,7 @@
  * implemented view — there are no decorative placeholders.
  */
 
-import { AudioLines, BookOpen, Boxes, Combine, Cpu, House, KeySquare, ListChecks, Mic, MicOff, MicVocal, Music2, PanelLeftClose, PanelLeftOpen, Scissors, Settings, Split, ShieldCheck, type LucideIcon } from "lucide-react";
+import { AudioLines, BookOpen, Boxes, Combine, Cpu, House, KeySquare, ListChecks, Mic, MicOff, MicVocal, Music2, PanelLeftClose, PanelLeftOpen, Scissors, Settings, SlidersHorizontal, Split, ShieldCheck, Zap, type LucideIcon } from "lucide-react";
 import { HELP_BY_ID } from "@/lib/studio/help-content";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Badge } from "@/components/ui/badge";
@@ -26,6 +26,8 @@ const GROUPS: { title: string; items: NavItem[] }[] = [
       { id: "home", label: "Home", icon: House },
       { id: "cutter", label: "Cutter", icon: Scissors },
       { id: "joiner", label: "Joiner", icon: Combine },
+      { id: "mixer", label: "Multi-Track Mixer", icon: SlidersHorizontal },
+      { id: "batch", label: "Batch Processor", icon: Zap },
       { id: "pitcher", label: "Pitcher", icon: Music2 },
       { id: "key-bpm", label: "Key & BPM Finder", icon: KeySquare },
       { id: "recorder", label: "Recorder", icon: Mic },

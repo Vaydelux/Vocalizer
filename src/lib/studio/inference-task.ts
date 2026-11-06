@@ -20,14 +20,16 @@ import { baseName, sanitizeFileName, timestampSlug } from "./format";
 
 export interface SeparationRequest {
   track: AudioTrack;
-  /** Requested stems (e.g. ["Vocals","Instrumental"] for the Remover). */
+  /** Requested stems (e.g. ["Vocals","Instrumental"] or ["Vocals","Drums","Bass","Other"]). */
   requestedStems: ModelStem[];
-  /** Preferred model id (null → use the bundled default). */
+  /** Preferred model id (null → use the bundled default or local path). */
   preferredModelId: string | null;
+  modelId?: string;
+  architecture?: "mdx-net" | "demucs" | "bs-roformer" | "melband-roformer" | "vr-arch" | "mdxc";
   device: "auto" | "cpu" | "cuda" | "directml";
   outputFormat: ExportFormat;
   mp3Bitrate?: Mp3Bitrate;
-  /** Explicit local MDX checkpoint selected by the user. Never fetched automatically. */
+  /** Explicit local model checkpoint selected by the user. Never fetched automatically. */
   localModelPath?: string;
   profile?: "low-memory" | "balanced" | "thorough";
 }
@@ -43,9 +45,7 @@ export function makeInferenceTask(req: SeparationRequest): JobTask {
     }
     const api = native()!;
 
-    // This early preview permits one verified local MDX-Net model selected
-    // through Electron's native dialog. Do not assume a registered manifest
-    // means weights are installed, or that the built-in slot actually exists.
+    // Validate model selection
     if (!req.localModelPath) {
       const models = useModels.getState();
       const resolution = await resolveModelForOperation(
@@ -58,20 +58,18 @@ export function makeInferenceTask(req: SeparationRequest): JobTask {
         }
       );
       const reason = "reason" in resolution ? resolution.reason : "No usable model path was selected.";
-      throw studioError("MODEL_UNAVAILABLE", `Select a verified local MDX model file. ${reason}`);
+      throw studioError("MODEL_UNAVAILABLE", `Select a verified local model file. ${reason}`);
     }
-    if (req.requestedStems.length !== 2 ||
-        !req.requestedStems.includes("Vocals") ||
-        !req.requestedStems.includes("Instrumental")) {
-      throw studioError("MODEL_UNAVAILABLE", "The local MDX-Net preview supports Vocals + Instrumental only.");
+    if (req.requestedStems.length === 0) {
+      throw studioError("MODEL_UNAVAILABLE", "At least one target stem must be selected.");
     }
     const status = await api.inferenceStatus();
     if (!status.workerAvailable) {
       throw studioError("CAPABILITY_UNAVAILABLE", "The native Python inference worker is not bundled or installed.");
     }
-    const modelId = "UVR-MDX-NET-Inst_HQ_5.onnx";
-    // The main-process IPC handler re-hashes and validates the selected file.
+    const modelId = req.modelId ?? req.localModelPath.split(/[\\/]/).pop() ?? "model";
     const modelPath = req.localModelPath;
+    const arch = req.architecture ?? (req.requestedStems.length > 2 ? "demucs" : "mdx-net");
 
     // 3. Resolve real filesystem paths.
     const inputPath = api.getPathForFile(req.track.file);
@@ -79,7 +77,7 @@ export function makeInferenceTask(req: SeparationRequest): JobTask {
     if (!outputDir) throw studioError("CANCELLED", "No output directory selected.");
 
     const fmt = req.outputFormat === "wav16" ? "wav" : req.outputFormat === "wav24" ? "wav24" : req.outputFormat;
-    ctx.log(`Inference: ${modelId} on CPU, profile=${req.profile ?? "balanced"} → ${outputDir}`);
+    ctx.log(`Inference: ${modelId} (${arch}) on ${req.device}, profile=${req.profile ?? "balanced"} → ${outputDir}`);
 
     // 4. Subscribe to progress, then run.
     const unsub = api.onInferenceProgress((p) => {
@@ -97,12 +95,12 @@ export function makeInferenceTask(req: SeparationRequest): JobTask {
         jobId: ctx.jobId,
         modelId,
         modelPath,
-        architecture: "mdx-net",
+        architecture: arch,
         inputPath,
         outputDir,
         requestedStems: req.requestedStems,
         outputFormat: fmt,
-        device: "cpu",
+        device: req.device,
         profile: req.profile ?? "balanced",
       });
       ctx.log(

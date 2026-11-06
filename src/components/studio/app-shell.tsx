@@ -12,6 +12,7 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import { ErrorBoundary } from "./error-boundary";
 import { SidebarNav } from "./sidebar-nav";
 import { StatusFooter } from "./status-footer";
+import { ProjectBar } from "./project-bar";
 import { useUi, type ViewId } from "@/lib/studio/store-ui";
 import { useSettings } from "@/lib/studio/store-settings";
 import { cn } from "@/lib/utils";
@@ -19,6 +20,8 @@ import { cn } from "@/lib/utils";
 import { HomeView } from "@/features/studio/home-view";
 import { CutterView } from "@/features/studio/cutter-view";
 import { JoinerView } from "@/features/studio/joiner-view";
+import { MixerView } from "@/features/studio/mixer-view";
+import { BatchView } from "@/features/studio/batch-view";
 import { PitcherView } from "@/features/studio/pitcher-view";
 import { KeyBpmView } from "@/features/studio/key-bpm-view";
 import { RecorderView } from "@/features/studio/recorder-view";
@@ -40,6 +43,10 @@ function ActiveView() {
       return <CutterView />;
     case "joiner":
       return <JoinerView />;
+    case "mixer":
+      return <MixerView />;
+    case "batch":
+      return <BatchView />;
     case "pitcher":
       return <PitcherView />;
     case "key-bpm":
@@ -130,6 +137,7 @@ export function AppShell() {
             {activeView.replaceAll("-", " ")}
           </span>
         </header>
+        <ProjectBar />
         <main id="studio-main" ref={mainRef} tabIndex={-1}
           className="studio-scroll min-h-0 flex-1 overflow-y-auto outline-none">
           <ErrorBoundary key={activeView}>

@@ -15,6 +15,7 @@ import { TrackSelect } from "@/components/studio/track-select";
 import { WavePlayer, type RegionRange, type WavePlayerHandle } from "@/components/studio/wave-player";
 import { InlineJob } from "@/components/studio/inline-job";
 import { ExportFormatSelect, useExportFormatDefault, type ExportFormatValue } from "@/components/studio/export-format-select";
+import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -39,6 +40,8 @@ export function CutterView() {
   const [startText, setStartText] = useState("");
   const [endText, setEndText] = useState("");
   const [fmt, setFmt] = useState<ExportFormatValue>(useExportFormatDefault());
+  const [lossless, setLossless] = useState(false);
+  const [loudnorm, setLoudnorm] = useState(false);
 
   // Undo/redo of region edit instructions.
   const historyRef = useRef<{ stack: (RegionRange | null)[]; ptr: number }>({
@@ -127,14 +130,23 @@ export function CutterView() {
   const enqueueTrim = useCallback(
     (label: string, start: number, end: number) => {
       if (!track) return;
+      const tag = lossless ? " [lossless]" : loudnorm ? " [LUFS]" : "";
       jobsEnqueue(
         "export",
-        label,
-        makeTrimTask({ track, startSec: start, endSec: end, format: fmt.format, mp3Bitrate: fmt.mp3Bitrate })
+        label + tag,
+        makeTrimTask({
+          track,
+          startSec: start,
+          endSec: end,
+          format: fmt.format,
+          mp3Bitrate: fmt.mp3Bitrate,
+          lossless,
+          loudnessNormalize: loudnorm && !lossless ? { targetLufs: -14, truePeak: -1.0 } : undefined,
+        })
       );
-      toast.info("Added to processing queue", { description: label });
+      toast.info("Added to processing queue", { description: label + tag });
     },
-    [track, jobsEnqueue, fmt]
+    [track, jobsEnqueue, fmt, lossless, loudnorm]
   );
 
   const exportSelection = useCallback(() => {
@@ -225,7 +237,54 @@ export function CutterView() {
                     ? `Selected ${(region.end - region.start).toFixed(3)} s — ${formatTimeMs(region.start)} → ${formatTimeMs(region.end)}`
                     : "No selection yet. Drag on the waveform or use I/O keys."}
                 </p>
-                <ExportFormatSelect value={fmt} onChange={setFmt} />
+                <div className="space-y-3 rounded-md border border-border/60 bg-muted/20 p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="space-y-0.5">
+                      <Label htmlFor="lossless-switch" className="text-xs font-medium cursor-pointer">
+                        Lossless Stream-Copy
+                      </Label>
+                      <p className="text-[11px] text-muted-foreground">
+                        Instant cut without re-encoding. Bit-for-bit identical audio quality.
+                      </p>
+                    </div>
+                    <Switch
+                      id="lossless-switch"
+                      checked={lossless}
+                      onCheckedChange={(c) => {
+                        setLossless(c);
+                        if (c) setLoudnorm(false);
+                      }}
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="space-y-0.5">
+                      <Label htmlFor="loudnorm-switch" className="text-xs font-medium cursor-pointer">
+                        EBU R128 Loudness Normalization
+                      </Label>
+                      <p className="text-[11px] text-muted-foreground">
+                        Normalize to broadcast standard -14 LUFS with -1.0 dBFS true peak.
+                      </p>
+                    </div>
+                    <Switch
+                      id="loudnorm-switch"
+                      checked={loudnorm}
+                      disabled={lossless}
+                      onCheckedChange={(c) => {
+                        setLoudnorm(c);
+                        if (c) setLossless(false);
+                      }}
+                    />
+                  </div>
+                </div>
+
+                {!lossless ? (
+                  <ExportFormatSelect value={fmt} onChange={setFmt} />
+                ) : (
+                  <p className="text-xs text-muted-foreground italic">
+                    Output format matches source container (stream copied).
+                  </p>
+                )}
                 <div className="flex flex-wrap items-center gap-2">
                   <Button size="sm" onClick={exportSelection} disabled={!region} className="gap-1.5">
                     <Scissors className="h-3.5 w-3.5" aria-hidden /> Export selection

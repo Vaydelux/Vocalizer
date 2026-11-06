@@ -37,6 +37,8 @@ export const HELP_ENTRIES: HelpEntry[] = [
       {label:"Split at midpoint",description:"Divides the current selection at its center for editing; this does not overwrite the source."},
       {label:"Undo / Redo",description:"Reverses or reapplies recent selection edits during this editing session."},
       {label:"Export format / bitrate",description:"WAV is uncompressed PCM; MP3 is compressed. Higher MP3 bitrate generally uses more space."},
+      {label:"Lossless Stream-Copy",description:"Extracts selected audio without re-encoding, preserving 100% bit-for-bit quality instantly."},
+      {label:"Loudness Normalization",description:"Applies standard EBU R128 (-14 LUFS) broadcast normalization to meet streaming requirements."},
     ]
   },
   {
@@ -52,6 +54,48 @@ export const HELP_ENTRIES: HelpEntry[] = [
       {label:"Sample rate",description:"Follows Settings → Export when the sample-rate control is not editable on this page."},
       {label:"Join / Export",description:"Queues a new output and preserves all originals."},
     ]
+  },
+  {
+    id: "mixer",
+    title: "Multi-Track Mixer & DAW",
+    availability: "Ready for desktop testing",
+    summary: "Arrange, balance, pan, and apply studio DSP effect chains across multiple audio tracks.",
+    steps: [
+      "Add tracks from your audio library into individual mixer lanes.",
+      "Adjust volume faders, stereo panning, solo/mute states, and start offsets.",
+      "Open the DSP rack to configure 3-band parametric EQ, compressor, and limiter.",
+      "Configure master bus fader and EBU R128 loudness normalization.",
+      "Select Bounce Master to export a combined multi-track mixdown.",
+    ],
+    controls: [
+      { label: "Volume Fader", description: "Sets the output level of the channel in decibels from -48 dB to +6 dB." },
+      { label: "Pan Slider", description: "Controls stereo positioning between full left (-100%) and full right (+100%)." },
+      { label: "Solo / Mute (S/M)", description: "Isolates active tracks or silences unwanted channels in the mixdown matrix." },
+      { label: "DSP Effect Rack", description: "Configures real-time parametric equalizer, dynamic compressor, and peak limiter." },
+      { label: "Arrangement Offsets", description: "Sets timeline start positions for each clip in seconds before master mixdown." },
+      { label: "Bounce Master", description: "Bounces all audible lanes through the multi-bus filter graph into a verified stereo output." },
+    ],
+  },
+  {
+    id: "batch",
+    title: "Batch Audio Processor",
+    availability: "Ready for desktop testing",
+    summary: "Bulk transcode, resample, normalize, and strip silence across 10 to 100+ audio files.",
+    steps: [
+      "Add audio files from your library or click Add All Library Tracks.",
+      "Configure target container, MP3 bitrate, and sample rate in the global recipe.",
+      "Enable EBU R128 loudness normalization (-14 LUFS) to ensure consistent volume.",
+      "Adjust worker concurrency to match your system core capacity.",
+      "Select Start Batch and monitor live progress and 60fps mastering spectrum.",
+    ],
+    controls: [
+      { label: "Global Batch Recipe", description: "Configures destination codec, sample rate, and bitrates applied to every track in queue." },
+      { label: "Worker Concurrency", description: "Sets the number of parallel workers processing audio simultaneously (1 to 4 workers)." },
+      { label: "Loudness Normalization", description: "Applies standard EBU R128 (-14 LUFS) normalization across all batch outputs." },
+      { label: "Naming Pattern", description: "Customizes the output filename format with automatic token substitution." },
+      { label: "Mastering Visualizer", description: "Real-time 60fps FFT spectrum analyzer, true peak decibel meter, and phase correlation monitor." },
+      { label: "Start / Cancel Batch", description: "Initiates parallel batch execution or safely aborts pending background jobs." },
+    ],
   },
   {
     id:"pitcher",title:"Pitcher",availability:"Ready for desktop testing",summary:"Adjust pitch and tempo locally, and compare processed versus original audio.",

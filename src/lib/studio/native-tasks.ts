@@ -106,18 +106,27 @@ interface FormatOverride {
 /* ----------------------------------- tasks --------------------------------- */
 
 export async function nativeTrimTask(
-  input: { track: AudioTrack; startSec: number; endSec: number; override?: FormatOverride },
+  input: {
+    track: AudioTrack;
+    startSec: number;
+    endSec: number;
+    lossless?: boolean;
+    loudnessNormalize?: { targetLufs: number; truePeak: number };
+    override?: FormatOverride;
+  },
   ctx: JobCtx
 ): Promise<JobResultFile> {
   const fmt = input.override?.format ?? "wav16";
   const outputPath = await chooseOutputPath(input.track.name, fmt);
-  ctx.log(`FFmpeg trim ${input.track.name} → ${outputPath}`);
+  ctx.log(`FFmpeg trim ${input.track.name} → ${outputPath}${input.lossless ? " [lossless copy]" : ""}`);
   const op: FfmpegOp = {
     jobId: ctx.jobId,
     kind: "trim",
     inputPath: filePath(input.track.file),
     startSec: input.startSec,
     endSec: input.endSec,
+    lossless: input.lossless,
+    loudnessNormalize: input.loudnessNormalize,
     outputFormat: mapFormat(fmt),
     outputPath,
   };
@@ -164,7 +173,13 @@ export async function nativePitchTask(
 }
 
 export async function nativeConvertTask(
-  input: { file: File; friendlyName: string; override?: FormatOverride },
+  input: {
+    file: File;
+    friendlyName: string;
+    sampleRate?: 44100 | 48000 | null;
+    loudnessNormalize?: { targetLufs: number; truePeak: number };
+    override?: FormatOverride;
+  },
   ctx: JobCtx
 ): Promise<JobResultFile> {
   const fmt = input.override?.format ?? "wav16";
@@ -174,7 +189,8 @@ export async function nativeConvertTask(
     jobId: ctx.jobId,
     kind: "convert",
     inputPath: filePath(input.file),
-    sampleRate: null,
+    sampleRate: input.sampleRate ?? null,
+    loudnessNormalize: input.loudnessNormalize,
     outputFormat: mapFormat(fmt),
     outputPath,
   };
@@ -226,6 +242,50 @@ export async function nativeMixTask(
       });
     }
   }
+}
+
+export async function nativeMultitrackTask(
+  input: {
+    lanes: Array<{
+      track: AudioTrack;
+      offsetSec: number;
+      gainDb: number;
+      pan: number;
+      filters?: string[];
+    }>;
+    masterGainDb: number;
+    masterFilters?: string[];
+    loudnessNormalize?: { targetLufs: number; truePeak: number };
+    defaultName?: string;
+    override?: FormatOverride;
+  },
+  ctx: JobCtx
+): Promise<JobResultFile> {
+  const fmt = input.override?.format ?? "wav16";
+  const defaultName = input.defaultName ?? "multitrack-master";
+  const outputPath = await chooseOutputPath(defaultName, fmt);
+  ctx.log(`FFmpeg multitrack mixdown (${input.lanes.length} lanes) → ${outputPath}`);
+
+  const mappedLanes = input.lanes.map((l) => ({
+    inputPath: filePath(l.track.file),
+    offsetSec: l.offsetSec,
+    gainDb: l.gainDb,
+    pan: l.pan,
+    filters: l.filters,
+  }));
+
+  const op: FfmpegOp = {
+    jobId: ctx.jobId,
+    kind: "multitrack",
+    outputFormat: mapFormat(fmt),
+    outputPath,
+    lanes: mappedLanes,
+    masterGainDb: input.masterGainDb,
+    masterFilters: input.masterFilters,
+    loudnessNormalize: input.loudnessNormalize,
+  };
+
+  return await runAndWrap(op, ctx, outputPath);
 }
 
 export { isNative };

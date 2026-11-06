@@ -18,7 +18,10 @@ import { useAnalysis } from "./store-analysis";
 import { baseName, sanitizeFileName, timestampSlug } from "./format";
 import { studioError } from "./errors";
 import { isNative } from "./native";
-import { nativeTrimTask, nativeJoinTask, nativePitchTask, nativeConvertTask, nativeMixTask } from "./native-tasks";
+import { nativeTrimTask, nativeJoinTask, nativePitchTask, nativeConvertTask, nativeMixTask, nativeMultitrackTask } from "./native-tasks";
+import { buildFfmpegDspFilters, type DspEffectChain } from "./dsp-effects";
+import { buildSpatialAudioFilter, createSpatialPannerNode, type SpatialPosition } from "./spatial-audio";
+import { compileAutomationToFfmpegFilter, type AutomationLane } from "./automation";
 
 interface FormatOverride {
   format?: ExportFormat;
@@ -71,6 +74,8 @@ export interface TrimTaskInput {
   track: AudioTrack;
   startSec: number;
   endSec: number;
+  lossless?: boolean;
+  loudnessNormalize?: { targetLufs: number; truePeak: number };
   format?: ExportFormat;
   mp3Bitrate?: Mp3Bitrate;
 }
@@ -78,7 +83,14 @@ export interface TrimTaskInput {
 export function makeTrimTask(input: TrimTaskInput) {
   if (isNative()) {
     return (ctx: JobCtx) => nativeTrimTask(
-      { track: input.track, startSec: input.startSec, endSec: input.endSec, override: { format: input.format, mp3Bitrate: input.mp3Bitrate } },
+      {
+        track: input.track,
+        startSec: input.startSec,
+        endSec: input.endSec,
+        lossless: input.lossless,
+        loudnessNormalize: input.loudnessNormalize,
+        override: { format: input.format, mp3Bitrate: input.mp3Bitrate },
+      },
       ctx
     );
   }
@@ -198,6 +210,8 @@ export interface ConvertTaskInput {
   file: File;
   friendlyName: string;
   sampleRateHint?: number;
+  sampleRate?: 44100 | 48000 | null;
+  loudnessNormalize?: { targetLufs: number; truePeak: number };
   format?: ExportFormat;
   mp3Bitrate?: Mp3Bitrate;
 }
@@ -205,7 +219,13 @@ export interface ConvertTaskInput {
 export function makeConvertTask(input: ConvertTaskInput) {
   if (isNative()) {
     return (ctx: JobCtx) => nativeConvertTask(
-      { file: input.file, friendlyName: input.friendlyName, override: { format: input.format, mp3Bitrate: input.mp3Bitrate } },
+      {
+        file: input.file,
+        friendlyName: input.friendlyName,
+        sampleRate: input.sampleRate,
+        loudnessNormalize: input.loudnessNormalize,
+        override: { format: input.format, mp3Bitrate: input.mp3Bitrate },
+      },
       ctx
     );
   }
@@ -302,5 +322,122 @@ export function makeKeyTask(input: AnalysisTaskInput) {
     const json = JSON.stringify({ track: track.name, ...result }, null, 2);
     const blob = new Blob([json], { type: "application/json" });
     return { name: `${outName(track.name, "key")}.json`, size: blob.size, url: URL.createObjectURL(blob), mime: "application/json" };
+  };
+}
+
+/* -------------------------------- multitrack ------------------------------- */
+
+export interface MultitrackTaskInput {
+  lanes: Array<{
+    track: AudioTrack;
+    offsetSec: number;
+    gainDb: number;
+    pan: number;
+    effects?: DspEffectChain;
+    spatialEnabled?: boolean;
+    spatialPosition?: SpatialPosition;
+    automationLanes?: AutomationLane[];
+  }>;
+  masterGainDb: number;
+  masterEffects?: DspEffectChain;
+  masterMode?: "stereo" | "binaural" | "surround51";
+  loudnessNormalize?: { targetLufs: number; truePeak: number };
+  defaultName?: string;
+  format?: ExportFormat;
+  mp3Bitrate?: Mp3Bitrate;
+}
+
+export function makeMultitrackTask(input: MultitrackTaskInput) {
+  if (isNative()) {
+    return (ctx: JobCtx) =>
+      nativeMultitrackTask(
+        {
+          lanes: input.lanes.map((l) => {
+            const dspFilters = l.effects ? buildFfmpegDspFilters(l.effects) : [];
+            const spatialFilters =
+              l.spatialEnabled && l.spatialPosition
+                ? buildSpatialAudioFilter(
+                    l.spatialPosition,
+                    input.masterMode === "surround51" ? "surround51" : "binaural"
+                  )
+                : [];
+            const autoFilters: string[] = [];
+            if (l.automationLanes && l.automationLanes.length > 0) {
+              for (const al of l.automationLanes) {
+                if (al.enabled && al.points.length > 0) {
+                  const f = compileAutomationToFfmpegFilter(al.target, al.points);
+                  if (f) autoFilters.push(f);
+                }
+              }
+            }
+            const allFilters = [...dspFilters, ...spatialFilters, ...autoFilters];
+            return {
+              track: l.track,
+              offsetSec: l.offsetSec,
+              gainDb: l.gainDb,
+              pan: l.pan,
+              filters: allFilters.length > 0 ? allFilters : undefined,
+            };
+          }),
+          masterGainDb: input.masterGainDb,
+          masterFilters: input.masterEffects ? buildFfmpegDspFilters(input.masterEffects) : undefined,
+          loudnessNormalize: input.loudnessNormalize,
+          defaultName: input.defaultName,
+          override: { format: input.format, mp3Bitrate: input.mp3Bitrate },
+        },
+        ctx
+      );
+  }
+
+  return async (ctx: JobCtx): Promise<JobResultFile> => {
+    ctx.log(`Web Audio multitrack mixdown of ${input.lanes.length} lanes (mode: ${input.masterMode ?? "stereo"})…`);
+    const buffers: { buffer: AudioBuffer; lane: (typeof input.lanes)[0] }[] = [];
+    for (let i = 0; i < input.lanes.length; i++) {
+      if (ctx.signal.aborted) throw new DOMException("Aborted", "AbortError");
+      const lane = input.lanes[i];
+      ctx.reportProgress((0.5 * i) / input.lanes.length, `Decoding lane ${i + 1}/${input.lanes.length}`);
+      const { buffer } = await decodeFile(lane.track.file, ctx.signal);
+      buffers.push({ buffer, lane });
+    }
+
+    let maxDuration = 0;
+    for (const b of buffers) {
+      const end = b.lane.offsetSec + b.buffer.duration;
+      if (end > maxDuration) maxDuration = end;
+    }
+    const sampleRate = 44100;
+    const totalSamples = Math.ceil(maxDuration * sampleRate);
+    const offlineCtx = new OfflineAudioContext(2, Math.max(1, totalSamples), sampleRate);
+
+    // Master bus
+    const masterGain = offlineCtx.createGain();
+    masterGain.gain.value = Math.pow(10, input.masterGainDb / 20);
+    masterGain.connect(offlineCtx.destination);
+
+    for (const b of buffers) {
+      const src = offlineCtx.createBufferSource();
+      src.buffer = b.buffer;
+      const gain = offlineCtx.createGain();
+      gain.gain.value = Math.pow(10, b.lane.gainDb / 20);
+
+      src.connect(gain);
+
+      if (b.lane.spatialEnabled && b.lane.spatialPosition) {
+        const spatialPanner = createSpatialPannerNode(offlineCtx as unknown as AudioContext, b.lane.spatialPosition);
+        gain.connect(spatialPanner);
+        spatialPanner.connect(masterGain);
+      } else {
+        const panner = offlineCtx.createStereoPanner();
+        panner.pan.value = Math.max(-1, Math.min(1, b.lane.pan));
+        gain.connect(panner);
+        panner.connect(masterGain);
+      }
+
+      src.start(Math.max(0, b.lane.offsetSec));
+    }
+
+    ctx.reportProgress(0.65, "Rendering mixdown");
+    const rendered = await offlineCtx.startRendering();
+    return await encodeStep(ctx, rendered, outName(input.defaultName ?? "multitrack_master", "bounce"), 0.8, 1, input);
   };
 }

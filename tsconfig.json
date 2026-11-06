@@ -41,6 +41,7 @@
     "electron",
     "examples",
     "skills",
-    "mini-services"
+    "mini-services",
+    "tests"
   ]
 }

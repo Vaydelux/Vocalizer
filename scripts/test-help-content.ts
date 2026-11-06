@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { HELP_ENTRIES, HELP_BY_ID } from "../src/lib/studio/help-content";
 const views = [
-  "home","cutter","joiner","pitcher","key-bpm","recorder","karaoke",
+  "home","cutter","joiner","mixer","batch","pitcher","key-bpm","recorder","karaoke",
   "remover","splitter","models","queue","settings","system","help"
 ] as const;
 assert.equal(HELP_ENTRIES.length, views.length, "Each page needs a help entry.");

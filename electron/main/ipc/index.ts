@@ -73,12 +73,9 @@ const VERIFIED_MDX_NAME = "UVR-MDX-NET-Inst_HQ_5.onnx";
 const VERIFIED_MDX_SHA256 = "811cb24095d865763752310848b7ec86aeede0626cb05749ab35350e46897000";
 const VERIFIED_MDX_SIZE = 59074342;
 
-async function verifyLocalMdxModel(modelId: string, modelPath: string, architecture: string): Promise<void> {
-  if (architecture !== "mdx-net" || modelId !== VERIFIED_MDX_NAME) {
-    throw studioError("ARCHITECTURE_UNSUPPORTED", "Only the verified MDX-Net HQ 5 model is available for local testing.");
-  }
-  if (!path.isAbsolute(modelPath) || path.basename(modelPath) !== VERIFIED_MDX_NAME) {
-    throw studioError("MISSING_FILE", "Select the exact local ONNX checkpoint rather than a model identifier.");
+async function verifyLocalModel(modelId: string, modelPath: string, architecture: string): Promise<void> {
+  if (!path.isAbsolute(modelPath)) {
+    throw studioError("MISSING_FILE", "Select the exact local checkpoint file.");
   }
   let size: number;
   try {
@@ -88,17 +85,19 @@ async function verifyLocalMdxModel(modelId: string, modelPath: string, architect
   } catch {
     throw studioError("MISSING_FILE", "The chosen model checkpoint is missing or unreadable.");
   }
-  if (size !== VERIFIED_MDX_SIZE) {
-    throw studioError("MODEL_CORRUPTED", "The selected model does not match the approved checkpoint size.");
-  }
-  const hash = createHash("sha256");
-  try {
-    for await (const block of fs.createReadStream(modelPath)) hash.update(block);
-  } catch {
-    throw studioError("MISSING_FILE", "Cannot read the selected model file.");
-  }
-  if (hash.digest("hex") !== VERIFIED_MDX_SHA256) {
-    throw studioError("MODEL_CORRUPTED", "The selected checkpoint failed the SHA-256 integrity check.");
+  if (architecture === "mdx-net" && (modelId === VERIFIED_MDX_NAME || path.basename(modelPath) === VERIFIED_MDX_NAME)) {
+    if (size !== VERIFIED_MDX_SIZE) {
+      throw studioError("MODEL_CORRUPTED", "The selected model does not match the approved checkpoint size.");
+    }
+    const hash = createHash("sha256");
+    try {
+      for await (const block of fs.createReadStream(modelPath)) hash.update(block);
+    } catch {
+      throw studioError("MISSING_FILE", "Cannot read the selected model file.");
+    }
+    if (hash.digest("hex") !== VERIFIED_MDX_SHA256) {
+      throw studioError("MODEL_CORRUPTED", "The selected checkpoint failed the SHA-256 integrity check.");
+    }
   }
 }
 
@@ -106,7 +105,7 @@ async function verifyLocalMdxModel(modelId: string, modelPath: string, architect
 const completedInferenceStems = new Map<string, Map<string, string>>();
 const completedFfmpegOutputs = new Map<string, string>();
 const stagedRecordings = new Map<string, string>();
-const ALLOWED_STEMS = new Set(["Vocals", "Instrumental"]);
+const ALLOWED_STEMS = new Set(["Vocals", "Instrumental", "Drums", "Bass", "Guitar", "Piano", "Other"]);
 
 /** Playback is restricted to exact paths already verified by the main process.
  * This API is never exposed through the preload bridge. */
@@ -291,7 +290,7 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
     const req = inferenceSeparateRequestSchema.parse(raw);
     let scratch: string | null = null;
     try {
-      await verifyLocalMdxModel(req.modelId, req.modelPath, req.architecture);
+      await verifyLocalModel(req.modelId, req.modelPath, req.architecture);
       const root = inferenceScratchBase(app.getPath("userData"));
       await fs.promises.mkdir(root, { recursive: true });
       scratch = await fs.promises.mkdtemp(path.join(root, "job-"));
@@ -319,9 +318,8 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
         const actualScratch = await fs.promises.realpath(scratch);
         const approved = new Map<string, string>();
         const expected = new Set(req.requestedStems);
-        if (expected.size !== 2 || !expected.has("Vocals") || !expected.has("Instrumental") ||
-            result.stems.length !== expected.size) {
-          throw studioError("INFERENCE_FAILED", "The worker did not return the two expected stems.");
+        if (expected.size === 0 || result.stems.length !== expected.size) {
+          throw studioError("INFERENCE_FAILED", "The worker did not return the expected stems.");
         }
         for (const item of result.stems) {
           if (!expected.has(item.stem) || approved.has(item.stem)) {

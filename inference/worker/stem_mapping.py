@@ -9,14 +9,16 @@ from pathlib import Path
 
 from errors import WorkerError
 
-ALLOWED_STEMS = frozenset(("Vocals", "Instrumental"))
+ALLOWED_TWO_STEMS = frozenset(("Vocals", "Instrumental"))
+ALLOWED_FOUR_STEMS = frozenset(("Vocals", "Drums", "Bass", "Other"))
 
 
 def match_stems(file_names: list[str], requested: list[str]) -> list[str]:
-    if len(requested) != 2 or set(requested) != ALLOWED_STEMS:
-        raise WorkerError("architecture-unsupported", "The MDX-Net preview supports Vocals and Instrumental only.")
+    req_set = set(requested)
+    if req_set not in (ALLOWED_TWO_STEMS, ALLOWED_FOUR_STEMS):
+        raise WorkerError("architecture-unsupported", "Only 2-stem (Vocals/Instrumental) and 4-stem (Vocals/Drums/Bass/Other) are supported.")
     if len(file_names) != len(requested):
-        raise WorkerError("inference-failed", "The model did not return exactly two audio outputs.")
+        raise WorkerError("inference-failed", f"Expected {len(requested)} audio outputs, got {len(file_names)}.")
 
     matched: list[str] = []
     for name in file_names:

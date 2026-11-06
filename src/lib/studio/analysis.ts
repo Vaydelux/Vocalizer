@@ -13,6 +13,7 @@
 import { isAbort } from "./errors";
 import type { BpmAlternative, BpmResult, KeyAlternative, KeyResult } from "./types";
 import { pitchClassName } from "./format";
+import { runDspInWorker } from "./workers/dsp-worker";
 
 /* --------------------------------- yielding -------------------------------- */
 
@@ -184,8 +185,22 @@ export async function analyzeBpm(
   const endSample = useFull ? buffer.length : Math.min(buffer.length, startSample + maxWindow * sr);
   const analyzedSeconds = (endSample - startSample) / sr;
 
-  onProgress?.(0.02, "Extracting onset envelope");
   const mono = mixToMono(buffer, startSample, endSample);
+
+  // Attempt offloading to background DSP worker first
+  try {
+    const workerBpm = await runDspInWorker<BpmResult>(
+      "bpm",
+      { mono: new Float32Array(mono), sampleRate: sr, analyzedSeconds, useFull },
+      { onProgress, signal }
+    );
+    return workerBpm;
+  } catch (err) {
+    if (signal?.aborted) throw err;
+    // Fall back to main-thread processing
+  }
+
+  onProgress?.(0.02, "Extracting onset envelope");
   const { env, fps } = onsetEnvelope(mono, sr);
   mono.fill(0);
   await checkAbort(signal);
@@ -301,8 +316,20 @@ export async function analyzeKey(
   const useFull = buffer.duration <= maxWindow + 4;
   const startSample = useFull ? 0 : Math.floor(((buffer.duration - maxWindow) / 2) * sr);
   const endSample = useFull ? buffer.length : Math.min(buffer.length, startSample + maxWindow * sr);
-  const analyzedSeconds = (endSample - startSample) / sr;
-  void analyzedSeconds;
+  const mono = mixToMono(buffer, startSample, endSample);
+
+  // Attempt offloading to background DSP worker first
+  try {
+    const workerKey = await runDspInWorker<KeyResult>(
+      "key",
+      { mono: new Float32Array(mono), sampleRate: sr },
+      { onProgress, signal }
+    );
+    return workerKey;
+  } catch (err) {
+    if (signal?.aborted) throw err;
+    // Fall back to main-thread processing
+  }
 
   const FFT = 4096;
   const HOP = 4096; // 50% cost saving; chroma is aggregated over the window anyway

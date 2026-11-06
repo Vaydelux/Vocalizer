@@ -13,11 +13,13 @@ export interface FfmpegOp {
   jobId: string;
   outputFormat: FfmpegFormat;
   outputPath: string;
-  kind: "trim" | "join" | "pitch" | "convert" | "mix";
+  kind: "trim" | "join" | "pitch" | "convert" | "mix" | "multitrack";
   // trim / pitch / convert
   inputPath?: string;
   startSec?: number;
   endSec?: number;
+  lossless?: boolean;
+  loudnessNormalize?: { targetLufs: number; truePeak: number };
   semitones?: number;
   cents?: number;
   tempo?: number;
@@ -32,6 +34,16 @@ export interface FfmpegOp {
   vocalStartSec?: number;
   vocalGainDb?: number;
   instrumentalGainDb?: number;
+  // multitrack
+  lanes?: Array<{
+    inputPath: string;
+    offsetSec?: number;
+    gainDb?: number;
+    pan?: number;
+    filters?: string[];
+  }>;
+  masterGainDb?: number;
+  masterFilters?: string[];
 }
 
 export interface FfmpegResult {
