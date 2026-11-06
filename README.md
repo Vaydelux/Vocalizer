@@ -2,7 +2,7 @@
 
 Vocalizer is a Windows-first local audio studio built with Next.js/React and Electron, with FFmpeg-powered editing and a Python AI separation worker.
 
-**Release status:** The application is under development. CI builds use static export (no server-only API routes). A standalone MDX-Net CPU inference path has been reported working on Linux, but the Windows installer and bundled offline model are not yet verified. The current model's redistribution permission remains unresolved.
+**Release status:** The application is under development. CI builds use static export (no server-only API routes). A standalone MDX-Net CPU path has been reported working on Linux and Windows preview packaging has passed CI. The new HTDemucs four-stem CPU path is under validation; real-model Windows inference and clean-machine acceptance are not yet verified. The current model's redistribution permission remains unresolved.
 
 ## Get started
 
@@ -16,3 +16,5 @@ bun run dev
 See [Initial release plan](docs/INITIAL_RELEASE.md) for required Windows packaging, model licensing, security and offline-testing gates. See [Inference worker](inference/README.md) for the CPU inference setup and limitations.
 
 **Do not ship model files or credentials without reviewing their permissions and provenance.**
+
+For the local-only experimental HTDemucs v4 four-stem workflow, see [HTDemucs checkpoint and acceptance guide](docs/DEMUCS_V4_OFFLINE.md). Model weights are not included in the application.

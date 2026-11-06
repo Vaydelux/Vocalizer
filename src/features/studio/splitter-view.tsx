@@ -37,7 +37,7 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
-import { useTracks } from "@/lib/studio/store-tracks";
+import { useTracks, MAX_IMPORT_BYTES } from "@/lib/studio/store-tracks";
 import { useUi } from "@/lib/studio/store-ui";
 import { useSettings } from "@/lib/studio/store-settings";
 import { useMixer } from "@/lib/studio/store-mixer";
@@ -243,9 +243,20 @@ export function SplitterView() {
       const stemAudioUrl = `las://renderer/__stem-audio/${encodeURIComponent(completedStems.id)}/${stemName}`;
       try {
         const resp = await fetch(stemAudioUrl);
+        if (!resp.ok) throw new Error("The stem is no longer available for playback.");
+        const size = Number(resp.headers.get("content-length") ?? "0");
+        if (size > MAX_IMPORT_BYTES) {
+          throw new Error("Stem exceeds the in-memory import cap. Use the saved output on disk instead.");
+        }
         const blob = await resp.blob();
+        if (blob.size === 0 || blob.size > MAX_IMPORT_BYTES) {
+          throw new Error("Stem is empty or too large to import.");
+        }
+        const extension = item.path.toLowerCase().endsWith(".flac") ? "flac"
+          : item.path.toLowerCase().endsWith(".mp3") ? "mp3" : "wav";
+        const mime = extension === "flac" ? "audio/flac" : extension === "mp3" ? "audio/mpeg" : "audio/wav";
         const cleanTrackName = track.name.replace(/\.[^/.]+$/, "");
-        const stemFile = new File([blob], `${cleanTrackName}_${stemName}.wav`, { type: "audio/wav" });
+        const stemFile = new File([blob], `${cleanTrackName}_${stemName}.${extension}`, { type: mime });
         useTracks.getState().addFiles([stemFile]);
 
         // Small delay to allow store to register track
@@ -255,8 +266,10 @@ export function SplitterView() {
           addLane(newTrack.id);
           addedCount++;
         }
-      } catch {
-        // Fallback or preview
+      } catch (error) {
+        toast.error(`Could not import ${stemName} into mixer`, {
+          description: error instanceof Error ? error.message : "Unknown stem import error.",
+        });
       }
     }
 
@@ -445,7 +458,7 @@ export function SplitterView() {
                 {/* Custom Checkpoint Picker */}
                 <div className="space-y-1.5 pt-2 border-t border-border">
                   <div className="flex items-center justify-between">
-                    <Label className="text-xs font-medium">Custom Checkpoint (Optional)</Label>
+                    <Label className="text-xs font-medium">Verified Local Checkpoint (Required)</Label>
                     <Button
                       type="button"
                       size="sm"
