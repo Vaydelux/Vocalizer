@@ -101,6 +101,17 @@ export function MixerView() {
       return;
     }
 
+    const missingLanes = audibleLanes.filter((lane) => {
+      const track = getTrackById(lane.trackId);
+      return !track || track.status !== "ready" || track.file.size === 0;
+    });
+    if (missingLanes.length > 0) {
+      toast.error("Mixdown blocked: original audio is missing", {
+        description: `${missingLanes.length} mixer lane(s) need validated audio. Use Relink Audio in the project bar first.`,
+      });
+      return;
+    }
+
     const taskLanes = audibleLanes
       .map((l) => {
         const track = getTrackById(l.trackId);
