@@ -22,6 +22,7 @@ import { cleanupOrphanedRecordings } from "./services/recording-staging";
 import { cleanupInferenceScratch } from "./services/inference-outputs";
 import { shutdownWorkerImmediately } from "./services/inference-worker";
 import { parseNativeStemPlaybackPath } from "../shared/stem-input";
+import { streamVerifiedStem } from "./services/stem-media";
 
 export const isPackaged = app.isPackaged;
 const debugEnabled = process.argv.includes("--vocalizer-debug");
@@ -256,11 +257,9 @@ if (!app.requestSingleInstanceLock()) {
         if (!source) return new Response("Not found", { status: 404 });
         const media = await resolveCompletedStemForPlayback(source.jobId, source.stem);
         if (!media) return new Response("Not found", { status: 404 });
-        // Retain byte-range requests for long audio tracks and seeking.
-        const headers = new Headers();
-        const range = request.headers.get("range");
-        if (range) headers.set("range", range);
-        return net.fetch(pathToFileURL(media).href, { headers });
+        // Real 206 byte ranges; the file is streamed with backpressure and
+        // released on cancellation. Never fetch entire audio into a Blob.
+        return streamVerifiedStem(request, media);
       }
       // Check path components rather than a raw startsWith(base) prefix:
       // C:\\app\\out-evil is NOT inside C:\\app\\out.
