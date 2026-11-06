@@ -10,6 +10,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
+import { finishStemRoute, hasRoutedStemJob, reserveStemRoute, shouldAutoRouteStemJob } from "@/lib/studio/stem-routing";
 import {
   Split,
   FileAudio2,
@@ -110,6 +111,7 @@ export function SplitterView() {
   const [device, setDevice] = useState<"auto" | "cpu" | "cuda" | "directml">("cpu");
   const [profile, setProfile] = useState<"low-memory" | "balanced" | "thorough">("balanced");
   const [autoRouteToMixer, setAutoRouteToMixer] = useState(true);
+  const [, refreshRouteStatus] = useState(0);
 
   const [workerDetected, setWorkerDetected] = useState(false);
   const [checkingRuntime, setCheckingRuntime] = useState(true);
@@ -233,56 +235,72 @@ export function SplitterView() {
     });
   }
 
-  // Import completed stems as tracks and route to DAW mixer
-  const sendStemsToMixer = async () => {
+  // The automatic and manual paths share one idempotent operation.
+  const sendStemsToMixer = useCallback(async () => {
     if (!completedStems?.result?.stemFiles || !track) return;
+    const jobId = completedStems.id;
+    if (!reserveStemRoute(jobId)) return;
     let addedCount = 0;
-
-    for (const item of completedStems.result.stemFiles) {
-      const stemName = item.stem;
-      const stemAudioUrl = `las://renderer/__stem-audio/${encodeURIComponent(completedStems.id)}/${stemName}`;
-      try {
-        const resp = await fetch(stemAudioUrl);
-        if (!resp.ok) throw new Error("The stem is no longer available for playback.");
-        const size = Number(resp.headers.get("content-length") ?? "0");
-        if (size > MAX_IMPORT_BYTES) {
-          throw new Error("Stem exceeds the in-memory import cap. Use the saved output on disk instead.");
-        }
-        const blob = await resp.blob();
-        if (blob.size === 0 || blob.size > MAX_IMPORT_BYTES) {
-          throw new Error("Stem is empty or too large to import.");
-        }
-        const extension = item.path.toLowerCase().endsWith(".flac") ? "flac"
-          : item.path.toLowerCase().endsWith(".mp3") ? "mp3" : "wav";
-        const mime = extension === "flac" ? "audio/flac" : extension === "mp3" ? "audio/mpeg" : "audio/wav";
-        const cleanTrackName = track.name.replace(/\.[^/.]+$/, "");
-        const stemFile = new File([blob], `${cleanTrackName}_${stemName}.${extension}`, { type: mime });
-        useTracks.getState().addFiles([stemFile]);
-
-        // Small delay to allow store to register track
-        await new Promise((r) => setTimeout(r, 80));
-        const newTrack = useTracks.getState().tracks.find((t) => t.name === stemFile.name);
-        if (newTrack) {
-          addLane(newTrack.id);
+    try {
+      for (const item of completedStems.result.stemFiles) {
+        const stemName = item.stem;
+        const url = `las://renderer/__stem-audio/${encodeURIComponent(jobId)}/${stemName}`;
+        try {
+          const resp = await fetch(url);
+          if (!resp.ok) throw new Error("The completed stem is no longer available.");
+          const size = Number(resp.headers.get("content-length") ?? "0");
+          if (size > MAX_IMPORT_BYTES) {
+            throw new Error("Stem is larger than the in-memory import limit; use the saved file.");
+          }
+          const blob = await resp.blob();
+          if (blob.size === 0 || blob.size > MAX_IMPORT_BYTES) {
+            throw new Error("Stem is empty or exceeds the import limit.");
+          }
+          const ext = item.path.toLowerCase().endsWith(".flac") ? "flac"
+            : item.path.toLowerCase().endsWith(".mp3") ? "mp3" : "wav";
+          const mime = ext === "flac" ? "audio/flac" : ext === "mp3" ? "audio/mpeg" : "audio/wav";
+          const name = track.name.replace(/\.[^/.]+$/, "");
+          const stemFile = new File([blob], `${name}_${stemName}.${ext}`, { type: mime });
+          const oldIds = new Set(useTracks.getState().tracks.map((t) => t.id));
+          // Track registration is synchronous; metadata probing continues in
+          // the background. Avoid matching a previously imported file by name.
+          useTracks.getState().addFiles([stemFile]);
+          const created = useTracks.getState().tracks.find(
+            (t) => !oldIds.has(t.id) && t.name === stemFile.name
+          );
+          if (!created) throw new Error("The stem was rejected or already imported.");
+          addLane(created.id);
+          if (!useMixer.getState().lanes.some((lane) => lane.trackId === created.id)) {
+            throw new Error("Could not create a mixer lane for this stem.");
+          }
           addedCount++;
+        } catch (error) {
+          toast.error(`Could not import ${stemName} into mixer`, {
+            description: error instanceof Error ? error.message : "Unexpected mixer import error.",
+          });
         }
-      } catch (error) {
-        toast.error(`Could not import ${stemName} into mixer`, {
-          description: error instanceof Error ? error.message : "Unknown stem import error.",
-        });
       }
+    } finally {
+      finishStemRoute(jobId, addedCount > 0);
+      refreshRouteStatus((n) => n + 1);
     }
-
     if (addedCount > 0) {
       toast.success(`Sent ${addedCount} stems to Multi-Track Mixer`, {
-        description: "Opened in 32-Track DAW console with per-track volume, pan, and DSP.",
+        description: "Opened in the DAW console with volume, pan and DSP controls.",
       });
       setView("mixer");
     } else {
-      toast.error("Could not route stems to mixer. Verify stems were written successfully.");
+      toast.error("No stems could be imported; completed output files are still available on disk.");
     }
-  };
+  }, [completedStems, track, addLane, setView]);
 
+  // The checkbox now triggers the latest completed job on its source track.
+  // The module-level routing ledger remains valid when this page unmounts.
+  useEffect(() => {
+    if (shouldAutoRouteStemJob(autoRouteToMixer, lastJobId, trackId, completedStems)) {
+      void sendStemsToMixer();
+    }
+  }, [autoRouteToMixer, lastJobId, trackId, completedStems, sendStemsToMixer]);
 
   return (
     <div className="space-y-5">
@@ -538,7 +556,7 @@ export function SplitterView() {
                         Auto-route to Multi-Track Mixer
                       </div>
                       <div className="text-[11px] text-muted-foreground mt-0.5">
-                        Populate separated stems onto timeline lanes with volume, pan, and DSP racks.
+                        Automatically import completed stems once per job, with volume, pan and DSP controls.
                       </div>
                     </div>
                   </label>
@@ -558,9 +576,10 @@ export function SplitterView() {
                             variant="outline"
                             className="h-6 text-[10px] gap-1"
                             onClick={() => void sendStemsToMixer()}
+                            disabled={hasRoutedStemJob(completedStems.id)}
                           >
                             <SlidersHorizontal className="h-3 w-3" />
-                            Send to Mixer
+                            {hasRoutedStemJob(completedStems.id) ? "Already in Mixer" : "Send to Mixer"}
                           </Button>
                           <Button
                             type="button"
