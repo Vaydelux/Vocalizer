@@ -1,47 +1,65 @@
-/**
- * One-time routing ledger for completed inference jobs.
- * Stored per renderer session (rather than per component mount) so navigating
- * away and back cannot duplicate imported DAW lanes. Bounded to the job queue.
- */
-import type { Job } from "./types";
+/** Idempotent per-stem routing, shared across splitter component mounts. */
+import type { Job, ModelStem } from "./types";
 
 const active = new Set<string>();
-const routed = new Set<string>();
-const MAX_ROUTED_IDS = 100;
+const autoAttempted = new Set<string>();
+const routedStems = new Map<string, Set<ModelStem>>();
+const MAX_HISTORY = 100;
 
-export function hasRoutedStemJob(jobId: string): boolean {
-  return routed.has(jobId);
+function trimHistory(): void {
+  while (routedStems.size > MAX_HISTORY) {
+    const oldest = routedStems.keys().next().value;
+    if (!oldest) break;
+    routedStems.delete(oldest);
+    autoAttempted.delete(oldest);
+  }
+}
+
+export function pendingStemNames(jobId: string, expected: readonly ModelStem[]): ModelStem[] {
+  const imported = routedStems.get(jobId);
+  return [...new Set(expected)].filter((stem) => !imported?.has(stem));
+}
+
+export function hasRoutedStemJob(jobId: string, expected: readonly ModelStem[]): boolean {
+  return expected.length > 0 && pendingStemNames(jobId, expected).length === 0;
 }
 
 export function reserveStemRoute(jobId: string): boolean {
-  if (!jobId || active.has(jobId) || routed.has(jobId)) return false;
+  if (!jobId || active.has(jobId)) return false;
   active.add(jobId);
   return true;
 }
 
-export function finishStemRoute(jobId: string, importedAny: boolean): void {
+/** Record each successfully created lane. Unsuccessful stems remain retryable. */
+export function finishStemRoute(jobId: string, added: readonly ModelStem[]): void {
   if (!active.delete(jobId)) return;
-  if (!importedAny) return; // Allow explicit retry after an unsuccessful import.
-  routed.add(jobId);
-  while (routed.size > MAX_ROUTED_IDS) {
-    const oldest = routed.values().next().value;
-    if (oldest === undefined) break;
-    routed.delete(oldest);
-  }
+  if (!added.length) return;
+  const existing = routedStems.get(jobId) ?? new Set<ModelStem>();
+  for (const stem of added) existing.add(stem);
+  routedStems.delete(jobId);
+  routedStems.set(jobId, existing);
+  trimHistory();
 }
 
-/** Auto-route only the actual completed job the user launched on this track. */
+/** Attempt auto-import once, even if some stems fail, to avoid a retry loop. */
+export function markAutoStemAttempt(jobId: string): boolean {
+  if (!jobId || autoAttempted.has(jobId)) return false;
+  autoAttempted.add(jobId);
+  return true;
+}
+
 export function shouldAutoRouteStemJob(
   enabled: boolean,
   lastJobId: string | null,
   trackId: string | null,
   job: Pick<Job, "id" | "state" | "result"> | undefined,
 ): boolean {
+  const stems = job?.result?.stemFiles?.map((entry) => entry.stem) ?? [];
   return Boolean(
     enabled && lastJobId && trackId && job && job.id === lastJobId &&
     job.state === "completed" &&
     job.result?.sourceTrackId === trackId &&
-    job.result?.stemFiles?.length &&
-    !active.has(job.id) && !routed.has(job.id)
+    stems.length && pendingStemNames(job.id, stems).length &&
+    !active.has(job.id) && !autoAttempted.has(job.id)
   );
 }
