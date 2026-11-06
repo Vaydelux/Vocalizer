@@ -2,7 +2,9 @@
 # Install into a Python 3.11/3.12 venv:
 #   pip install -r requirements/cpu.txt --extra-index-url https://download.pytorch.org/whl/cpu
 #
-# NOTE: torch is required because audio-separator imports it at module load
+# NOTE: torch, torchvision and torchaudio must use a matched CPU wheel trio.
+# See https://pytorch.org/get-started/previous-versions/ for 2.5.1.
+# torch is also required because audio-separator imports it at module load
 # (even for MDX-Net, which uses onnxruntime for inference). Install the CPU
 # wheel from the PyTorch CPU index to avoid multi-GB CUDA wheels.
 # onnx2torch 1.6 is not published for Windows; pin the available 1.5.15
@@ -10,10 +12,10 @@
 
 audio-separator==0.47.2
 onnxruntime==1.31.1
-torch==2.15.0+cpu
-torchvision==0.29.2+cpu
+torch==2.5.1+cpu
+torchvision==0.20.1+cpu
 # HTDemucs v4 decoding, inference and real audio stem encoding.
-torchaudio==2.15.0+cpu
+torchaudio==2.5.1+cpu
 demucs==4.0.1
 onnx2torch==1.5.15
 julius>=0.2

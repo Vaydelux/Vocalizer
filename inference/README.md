@@ -14,8 +14,8 @@ No cloud inference, no automatic checkpoint downloads and no fabricated stems.
 | Python | 3.12.16 |
 | audio-separator | 0.47.2 |
 | onnxruntime | 1.31.1 (CPUExecutionProvider) |
-| torch | 2.15.0+cpu |
-| torchvision | 0.29.2+cpu |
+| torch | 2.5.1+cpu (Windows Demucs experimental stack; previous Linux verification used 2.15.0+cpu) |
+| torchvision | 0.20.1+cpu (Windows Demucs experimental stack) |
 | FFmpeg / FFprobe | 7.1.5 (system) |
 | Model | UVR-MDX-NET-Inst_HQ_5.onnx (MDX-Net, ~59 MB) |
 
@@ -141,3 +141,5 @@ verified rights is chosen).
 ## Experimental HTDemucs four-stem CPU path
 
 The new four-stem implementation is gated on real Windows audio acceptance and is **not yet production verified**. It uses exactly `955717e8-8726e21a.th`, checks SHA-256 `8726e21a993978c7ba086d3872e7608d7d5bfca646ca4aca459ffda844faa8b4`, and loads the single-model signature from an explicit local directory. No model is bundled or downloaded by the worker. See [the full operator and acceptance guide](../docs/DEMUCS_V4_OFFLINE.md).
+
+**Windows Demucs dependency gate:** Use a matched CPU-only Torch/Audio/Vision trio: `torch==2.5.1+cpu`, `torchaudio==2.5.1+cpu`, `torchvision==0.20.1+cpu`. The Windows workflow verifies importability and `pip check` before PyInstaller. This is different from the earlier Linux MDX verification environment.
