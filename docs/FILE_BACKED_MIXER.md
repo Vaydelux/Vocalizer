@@ -43,3 +43,23 @@ File-backed mixer lanes keep only references and small metadata objects.
   Quantitative before/after memory profiling remains a release criterion.
 - The saved stem must remain accessible on disk. If moved or deleted, native
   resolution fails rather than silently creating an empty mixdown.
+
+## Streaming and seeking (native desktop)
+
+The `las://renderer/__stem-audio/<jobId>/<stem>` endpoint now serves a
+real HTTP-style byte-range response directly from a verified file handle.
+Chromium's audio player can ask for `Range: bytes=start-end` without the
+renderer fetching the entire recording.
+
+- `200` for full GET requests; `206` and `Content-Range` for a valid
+  single byte range; `416` for malformed/unsatisfiable ranges.
+- Supports HEAD for metadata checks. Rejects unsupported HTTP methods and
+  multipart ranges, and sets `Cache-Control: no-store`.
+- Node streams use 64 KiB chunks with backpressure and release the file
+  descriptor when complete or cancelled. Byte offset planning supports files
+  beyond 4 GiB without 32-bit arithmetic.
+- Only the main-process completed/relinked stem registry can resolve a
+  playback source; no filesystem path is accepted from the URL.
+- This improves the transport layer; it does **not** certify fast seek
+  accuracy for every codec or eliminate decoder/FFmpeg memory usage.
+  Real long-session Windows playback and memory benchmarks remain gates.
