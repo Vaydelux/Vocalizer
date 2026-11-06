@@ -21,6 +21,7 @@ import { registerIpcHandlers, resolveCompletedStemForPlayback } from "./ipc";
 import { cleanupOrphanedRecordings } from "./services/recording-staging";
 import { cleanupInferenceScratch } from "./services/inference-outputs";
 import { shutdownWorkerImmediately } from "./services/inference-worker";
+import { parseNativeStemPlaybackPath } from "../shared/stem-input";
 
 export const isPackaged = app.isPackaged;
 const debugEnabled = process.argv.includes("--vocalizer-debug");
@@ -251,13 +252,9 @@ if (!app.requestSingleInstanceLock()) {
       // Separate, strictly allowlisted media namespace. Never resolve a
       // renderer-provided file path; the approved pathname lives in main IPC.
       if (relativePath.startsWith("__stem-audio/")) {
-        const parts = relativePath.split("/");
-        if (parts.length !== 3 ||
-            !/^[a-zA-Z0-9_-]{1,80}$/.test(parts[1]) ||
-            !["Vocals", "Instrumental", "Drums", "Bass", "Other"].includes(parts[2])) {
-          return new Response("Not found", { status: 404 });
-        }
-        const media = await resolveCompletedStemForPlayback(parts[1], parts[2]);
+        const source = parseNativeStemPlaybackPath(relativePath);
+        if (!source) return new Response("Not found", { status: 404 });
+        const media = await resolveCompletedStemForPlayback(source.jobId, source.stem);
         if (!media) return new Response("Not found", { status: 404 });
         // Retain byte-range requests for long audio tracks and seeking.
         const headers = new Headers();

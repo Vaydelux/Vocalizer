@@ -38,3 +38,15 @@ export function nativeStemPlaybackUrl(ref: NativeStemRef): string {
   nativeStemInput(ref);
   return `las://renderer/__stem-audio/${encodeURIComponent(ref.jobId)}/${ref.stem}`;
 }
+
+/** Parse the complete privileged playback namespace using the same stem
+ * allowlist as FFmpeg aliases. Rejects extra segments and encoded traversals. */
+export function parseNativeStemPlaybackPath(pathname: string): NativeStemRef | null {
+  const parts = pathname.split("/");
+  if (parts.length !== 3 || parts[0] !== "__stem-audio") return null;
+  try {
+    return parseNativeStemInput(`${STEM_INPUT_PREFIX}${parts[1]}:${parts[2]}`);
+  } catch {
+    return null;
+  }
+}
