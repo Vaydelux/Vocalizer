@@ -16,9 +16,19 @@ The process must exit with code 0 within 90 seconds after verifying:
 - Packaged Electron renderer displays actual application content.
 - The sandboxed preload exposes `window.studio.isNative === true`.
 - Native IPC reports that bundled FFmpeg and the frozen worker are present.
+- Main registers a short, synthetic WAV only in the packaged smoke-test
+  process; it cannot be registered by the renderer or by normal app sessions.
+- Chromium requests an actual `las://renderer/__stem-audio/` byte range from
+  the completed-stem registry and verifies `206`, `Content-Range`, returned
+  byte count, and content length.
+- A real Chromium HTMLAudioElement loads metadata and seeks to 1.0 seconds
+  through that same media route, without requiring autoplay.
+- The request for an unregistered stem is still rejected by native IPC.
 
-A passing startup probe **does not** verify real audio playback, inference,
-correct model weights, microphone devices or Windows media permissions.
+A passing startup probe **does not** establish audible output, real-song codec
+seeking, inference fidelity, correct model weights, microphone devices, or
+Windows media permissions. It only proves metadata, byte-range transport and
+seeking on a short synthetic PCM WAV inside packaged Chromium.
 
 ## Manual clean-machine acceptance
 
