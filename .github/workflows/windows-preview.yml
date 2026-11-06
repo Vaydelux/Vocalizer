@@ -57,7 +57,7 @@ jobs:
           # Validate the native CPU stack before freezing it into an EXE.
           python -m pip check
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python -c "import torch, torchvision, torchaudio, demucs.api; assert torch.__version__.startswith('2.5.1'); assert torchaudio.__version__.startswith('2.5.1'); assert not torch.cuda.is_available(); print('CPU Torch + TorchAudio + Demucs imports verified')"
+          python -c "import torch, torchvision, torchaudio, demucs.pretrained, demucs.apply, demucs.audio; assert torch.__version__.startswith('2.5.1'); assert torchaudio.__version__.startswith('2.5.1'); assert not torch.cuda.is_available(); print('CPU Torch + TorchAudio + Demucs imports verified')"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m pip install pyinstaller pillow
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

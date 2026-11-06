@@ -1,5 +1,5 @@
-
-"""Demucs offline service contract tests (no model weights required for CI)."""
+"""Demucs 4.0.1 offline worker contract tests without bundled model weights."""
+from contextlib import nullcontext
 from pathlib import Path
 import sys
 import tempfile
@@ -8,14 +8,38 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "inference" / "worker"))
-
 from demucs_service import FOUR_STEMS, separate_demucs
 from errors import WorkerError
 from local_model import DEMUCS_FILENAME
 
 
 class FakeTensor:
-    shape = (2, 44100 * 3)
+    ndim = 2
+    shape = (2, 132300)
+
+    def mean(self, *_):
+        return self
+
+    def std(self):
+        return self
+
+    def clamp(self, **_):
+        return self
+
+    def __sub__(self, _):
+        return self
+
+    def __truediv__(self, _):
+        return self
+
+    def __mul__(self, _):
+        return self
+
+    def __add__(self, _):
+        return self
+
+    def __getitem__(self, _):
+        return self
 
     def detach(self):
         return self
@@ -24,64 +48,101 @@ class FakeTensor:
         return self
 
 
-class FakeSeparator:
+class FakeModel:
     samplerate = 44100
     audio_channels = 2
+    sources = ("drums", "bass", "other", "vocals")
 
-    def __init__(self, **kwargs):
-        if kwargs["model"] != "955717e8" or kwargs["device"] != "cpu" or kwargs["repo"] is None:
-            raise AssertionError("Demucs must use the pinned local model and CPU.")
+    def cpu(self):
+        return self
 
-    def separate_audio_file(self, path):
-        return FakeTensor(), {stem.lower(): FakeTensor() for stem in FOUR_STEMS}
+    def eval(self):
+        return self
 
 
-def fake_save_audio(tensor, path, samplerate, **kwargs):
+class FakeAudio:
+    def __init__(self, path):
+        self.path = path
+
+    def read(self, streams, samplerate, channels):
+        assert (streams, samplerate, channels) == (0, 44100, 2)
+        return FakeTensor()
+
+
+class FakeBoolean:
+    def all(self):
+        return True
+
+
+def local_model(signature, repo):
+    assert signature == "955717e8" and repo.is_dir()
+    return FakeModel()
+
+
+def run_model(model, mix, **options):
+    assert options["device"] == "cpu" and options["num_workers"] == 0
+    assert options["split"] is True and options["segment"] == 7
+    return FakeTensor()
+
+
+def save_audio(tensor, path, samplerate, **kwargs):
     assert samplerate == 44100
-    Path(path).write_bytes(b"real audio fixture stub")
+    Path(path).write_bytes(b"mock-test-only-audio")
 
 
-class OfflineDemucsTests(unittest.TestCase):
-    def test_rejects_invalid_stem_selection_without_importing_model(self):
-        with self.assertRaises(WorkerError) as error:
-            separate_demucs(DEMUCS_FILENAME, "missing.th", "x.wav", "out",
-                            ["Vocals", "Drums"], "wav", "cpu", "balanced", lambda *_: None)
-        self.assertEqual(error.exception.code, "architecture-unsupported")
+class DemucsServiceTests(unittest.TestCase):
+    def test_wrong_stems_rejected(self):
+        with self.assertRaises(WorkerError) as exc:
+            separate_demucs(DEMUCS_FILENAME, "missing.th", "file.wav", "out",
+                            ["Vocals"], "wav", "cpu", "balanced", lambda *_: None)
+        self.assertEqual(exc.exception.code, "architecture-unsupported")
 
-    def test_rejects_gpu_without_importing_model(self):
-        with self.assertRaises(WorkerError) as error:
-            separate_demucs(DEMUCS_FILENAME, "missing.th", "x.wav", "out",
+    def test_gpu_rejected(self):
+        with self.assertRaises(WorkerError) as exc:
+            separate_demucs(DEMUCS_FILENAME, "missing.th", "file.wav", "out",
                             list(FOUR_STEMS), "wav", "cuda", "balanced", lambda *_: None)
-        self.assertEqual(error.exception.code, "device-unsupported")
+        self.assertEqual(exc.exception.code, "device-unsupported")
 
-    def test_offline_local_model_uses_all_four_outputs(self):
+    def test_real_api_contract_and_four_output_validation(self):
+        torch = types.ModuleType("torch")
+        torch.no_grad = nullcontext
+        torch.isfinite = lambda tensor: FakeBoolean()
         demucs = types.ModuleType("demucs")
-        api = types.ModuleType("demucs.api")
+        pretrained = types.ModuleType("demucs.pretrained")
+        apply = types.ModuleType("demucs.apply")
         audio = types.ModuleType("demucs.audio")
-        api.Separator = FakeSeparator
-        audio.save_audio = fake_save_audio
+        pretrained.get_model = local_model
+        apply.apply_model = run_model
+        audio.AudioFile = FakeAudio
+        audio.save_audio = save_audio
+
         with tempfile.TemporaryDirectory() as folder:
-            fake_checkpoint = Path(folder) / DEMUCS_FILENAME
-            fake_checkpoint.write_bytes(b"fixture")
-            out = Path(folder) / "output"
+            input_file = Path(folder) / "input.wav"
+            input_file.write_bytes(b"input fixture")
+            model_file = Path(folder) / DEMUCS_FILENAME
+            model_file.write_bytes(b"fixture weights")
+            output = Path(folder) / "stems"
             progress = []
             with (
-                patch.dict(sys.modules, {"demucs": demucs, "demucs.api": api, "demucs.audio": audio}),
-                patch("demucs_service.require_local_demucs_model", return_value=fake_checkpoint),
+                patch.dict(sys.modules, {"torch": torch, "demucs": demucs,
+                                         "demucs.pretrained": pretrained,
+                                         "demucs.apply": apply,
+                                         "demucs.audio": audio}),
+                patch("demucs_service.require_local_demucs_model", return_value=model_file),
                 patch("demucs_service.verify_audio_file", side_effect=lambda p, **kwargs: (
                     self.assertTrue(Path(p).is_file()),
-                    self.assertEqual(kwargs["expected_sample_rate"], 44100),
                     self.assertEqual(kwargs["expected_channels"], 2),
+                    self.assertEqual(kwargs["expected_sample_rate"], 44100),
                     self.assertAlmostEqual(kwargs["expected_duration"], 3.0),
                 )),
             ):
                 stems, model, device, fallback = separate_demucs(
-                    DEMUCS_FILENAME, str(fake_checkpoint), "input.wav", str(out),
+                    DEMUCS_FILENAME, str(model_file), str(input_file), str(output),
                     list(FOUR_STEMS), "wav24", "cpu", "balanced",
                     lambda value, stage: progress.append((value, stage)),
                 )
-            self.assertEqual([x["stem"] for x in stems], list(FOUR_STEMS))
-            self.assertTrue(all(Path(x["path"]).is_file() for x in stems))
+            self.assertEqual([s["stem"] for s in stems], list(FOUR_STEMS))
+            self.assertTrue(all(Path(s["path"]).is_file() for s in stems))
             self.assertEqual((model, device, fallback), (DEMUCS_FILENAME, "cpu", False))
             self.assertEqual(progress[-1], (1.0, "Completed"))
 
