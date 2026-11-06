@@ -87,3 +87,23 @@ playback smoothness, disk throughput with real compressed media, or user
 hardware. Compare measurements only on like-for-like machines and test
 fixtures. Windows GUI memory and repeated real-song audition remain mandatory
 manual acceptance gates.
+
+## Long-session waveform virtualization
+
+The shared player now renders only the currently visible waveform canvas,
+regardless of the full duration or horizontal zoom. The horizontally scrollable
+layout holds a lightweight spacer whose logical width is capped at 4 million CSS
+pixels. The canvas bitmap itself is capped at 8192 physical pixels wide and
+tracks the viewport while scrolling.
+
+Pointer seeking, selection regions, and playhead mapping take the horizontal
+scroll position into account. The full decoded-waveform threshold remains
+unchanged; file-backed large AI stems still skip renderer PCM waveform decoding.
+A flat placeholder is intentional when peaks are unavailable. This reduces
+canvas allocation pressure and does **not** yet supply low-memory native peak
+extraction for giant stems.
+
+A real long-session Windows GUI check should include scroll/zoom/seek across
+a two-hour source, high-DPI monitors, project reopen, and resizing during
+playback. CI unit coverage checks timeline calculations, not physical UI GPU
+memory usage.
