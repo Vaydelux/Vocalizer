@@ -42,7 +42,7 @@ import { useUi } from "@/lib/studio/store-ui";
 import { useSettings } from "@/lib/studio/store-settings";
 import { useMixer } from "@/lib/studio/store-mixer";
 import { useJobs } from "@/lib/studio/store-jobs";
-import { useCompliance, computeSha256 } from "@/lib/studio/compliance";
+
 import { makeInferenceTask } from "@/lib/studio/inference-task";
 import { formatTime } from "@/lib/studio/format";
 import { native, isNative } from "@/lib/studio/native";
@@ -65,14 +65,14 @@ const MODEL_PRESETS: ModelPreset[] = [
     architecture: "demucs",
     defaultStems: ["Vocals", "Drums", "Bass", "Other"],
     description: "Industry-standard 4-stem separation with dedicated drums and bass isolation.",
-    defaultFile: "htdemucs.onnx",
+    defaultFile: "htdemucs.th",
   },
   {
     id: "bs-roformer",
     name: "BS-RoFormer (High-Fidelity 4-Stem)",
     architecture: "bs-roformer",
-    defaultStems: ["Vocals", "Drums", "Bass", "Other"],
-    description: "Rotary Transformer architecture providing state-of-the-art stem bleed suppression.",
+    defaultStems: ["Vocals", "Instrumental"],
+    description: "RoFormer architecture (not yet integrated into the local worker).",
     defaultFile: "bs_roformer_ep_317_sdr_12.97.ckpt",
   },
   {
@@ -80,7 +80,7 @@ const MODEL_PRESETS: ModelPreset[] = [
     name: "MDX-Net HQ 5 (Vocal & Instrumental)",
     architecture: "mdx-net",
     defaultStems: ["Vocals", "Instrumental"],
-    description: "Ultra-fast two-stem vocal extractor with high dynamic range retention.",
+    description: "Checksum-verified two-stem CPU inference. Speed and quality depend on the local system.",
     defaultFile: "UVR-MDX-NET-Inst_HQ_5.onnx",
   },
 ];
@@ -100,15 +100,14 @@ export function SplitterView() {
   const jobs = useJobs((s) => s.jobs);
   const enqueue = useJobs((s) => s.enqueue);
   const addLane = useMixer((s) => s.addLane);
-  const recordCompliance = useCompliance((s) => s.recordEntry);
 
-  const [selectedPresetId, setSelectedPresetId] = useState<string>("demucs-v4");
+  const [selectedPresetId, setSelectedPresetId] = useState<string>("mdx-net-hq5");
   const selectedPreset = MODEL_PRESETS.find((p) => p.id === selectedPresetId) ?? MODEL_PRESETS[0];
 
   const [selectedStems, setSelectedStems] = useState<ModelStem[]>(selectedPreset.defaultStems);
   const [localModelPath, setLocalModelPath] = useState<string | null>(null);
   const [modelError, setModelError] = useState<string | null>(null);
-  const [device, setDevice] = useState<"auto" | "cpu" | "cuda" | "directml">("auto");
+  const [device, setDevice] = useState<"auto" | "cpu" | "cuda" | "directml">("cpu");
   const [profile, setProfile] = useState<"low-memory" | "balanced" | "thorough">("balanced");
   const [autoRouteToMixer, setAutoRouteToMixer] = useState(true);
 
@@ -169,6 +168,7 @@ export function SplitterView() {
   }, [refreshRuntime]);
 
   const toggleStem = (stem: ModelStem) => {
+    if (selectedPreset.architecture === "mdx-net") return;
     if (selectedStems.includes(stem)) {
       if (selectedStems.length > 1) {
         setSelectedStems(selectedStems.filter((s) => s !== stem));
@@ -196,7 +196,15 @@ export function SplitterView() {
 
   function startSeparation() {
     if (!track || !workerDetected || activeInference) return;
-    const modelPath = localModelPath || `/models/${selectedPreset.defaultFile}`;
+    if (selectedPreset.architecture !== "mdx-net") {
+      toast.error("This separation architecture is not enabled in the current CPU worker.");
+      return;
+    }
+    if (!localModelPath) {
+      setModelError("Select a verified local MDX-Net checkpoint. No models are bundled.");
+      return;
+    }
+    const modelPath = localModelPath;
 
     const id = enqueue(
       "inference",
@@ -257,55 +265,12 @@ export function SplitterView() {
     }
   };
 
-  // Record cryptographic audit entry for completed separation
-  const auditCompliance = async () => {
-    if (!track || !completedStems) return;
-    try {
-      const inputBuffer = await track.file.arrayBuffer();
-      const inputHash = await computeSha256(inputBuffer);
-
-      recordCompliance({
-        jobId: completedStems.id,
-        operation: "separation",
-        input: {
-          name: track.name,
-          sizeBytes: track.size,
-          sha256: inputHash,
-          sampleRate: track.meta?.sampleRate,
-          channels: track.meta?.channels,
-          durationSec: track.meta?.duration,
-        },
-        output: {
-          name: `${track.name}_${selectedStems.join("_")}_stems.zip`,
-          sizeBytes: track.size * 0.9,
-          sha256: inputHash.split("").reverse().join(""), // deterministic audit signature
-          format: exportFormat,
-          sampleRate: track.meta?.sampleRate,
-          channels: 2,
-          durationSec: track.meta?.duration,
-        },
-        loudnessMetrics: {
-          integratedLufs: -14.1,
-          truePeakDb: -1.0,
-          loudnessRangeLra: 6.8,
-          ebuR128Compliant: true,
-        },
-        dspApplied: ["Demucs v4 Neural Stem Separation", "EBU R128 Loudness Verification"],
-        operator: "Studio Audio Engineer",
-      });
-
-      setComplianceOpen(true);
-      toast.success("Cryptographic compliance entry recorded");
-    } catch {
-      toast.error("Failed to compute SHA-256 audit hash");
-    }
-  };
 
   return (
     <div className="space-y-5">
       <PageHeader
         title="Stem Splitter"
-        description="Deep learning neural audio source separation (Vocals, Drums, Bass, Other). Fully offline, zero data telemetry, enterprise compliant."
+        description="Local MDX-Net vocal/instrumental separation. Four-stem engines are planned but not available in this build."
         actions={
           <div className="flex items-center gap-2">
             <Button
@@ -345,7 +310,7 @@ export function SplitterView() {
           {checkingRuntime ? "Checking inference runtime…" : workerDetected ? "Python inference worker detected" : "Inference worker unavailable"}
         </span>
         <span className="rounded-full border border-border px-2.5 py-1 text-muted-foreground">
-          4-Stem & 2-Stem Neural Architectures
+          2-Stem MDX CPU Available; 4-Stem Planned
         </span>
         <span className="rounded-full border border-border px-2.5 py-1 text-muted-foreground">
           Hardware: CPU / CUDA / DirectML
@@ -399,7 +364,7 @@ export function SplitterView() {
                     </SelectTrigger>
                     <SelectContent>
                       {MODEL_PRESETS.map((preset) => (
-                        <SelectItem key={preset.id} value={preset.id} className="text-xs">
+                        <SelectItem key={preset.id} value={preset.id} disabled={preset.architecture !== "mdx-net"} className="text-xs">
                           {preset.name}
                         </SelectItem>
                       ))}
@@ -420,9 +385,10 @@ export function SplitterView() {
                         variant="ghost"
                         size="sm"
                         className="h-6 text-[10px] px-1.5"
-                        onClick={() => setSelectedStems(["Vocals", "Drums", "Bass", "Other"])}
+                        onClick={() => setSelectedStems(["Vocals", "Instrumental"])}
+                        disabled
                       >
-                        All 4
+                        All 4 (planned)
                       </Button>
                       <Button
                         type="button"
@@ -438,15 +404,16 @@ export function SplitterView() {
                         variant="ghost"
                         size="sm"
                         className="h-6 text-[10px] px-1.5"
-                        onClick={() => setSelectedStems(["Drums", "Bass"])}
+                        onClick={() => setSelectedStems(["Vocals", "Instrumental"])}
+                        disabled
                       >
-                        Rhythm
+                        Rhythm (planned)
                       </Button>
                     </div>
                   </div>
 
                   <div className="grid grid-cols-2 gap-2">
-                    {ALL_STEMS.map((stem) => {
+                    {ALL_STEMS.filter((stem) => selectedPreset.defaultStems.includes(stem)).map((stem) => {
                       const checked = selectedStems.includes(stem);
                       return (
                         <label
@@ -458,6 +425,7 @@ export function SplitterView() {
                           }`}
                         >
                           <Checkbox
+                            disabled={selectedPreset.architecture === "mdx-net"}
                             checked={checked}
                             onCheckedChange={() => toggleStem(stem)}
                           />
@@ -490,7 +458,7 @@ export function SplitterView() {
                     </div>
                   ) : (
                     <p className="text-[11px] text-muted-foreground">
-                      Using standard weights: <code className="text-[10px]">{selectedPreset.defaultFile}</code>
+                      No model is bundled. Select the checksum-verified local MDX-Net checkpoint.
                     </p>
                   )}
                   {modelError && <p className="text-xs text-destructive">{modelError}</p>}
@@ -516,10 +484,10 @@ export function SplitterView() {
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="auto" className="text-xs">Auto (Fastest)</SelectItem>
+                          <SelectItem value="auto" className="text-xs">Auto (CPU fallback)</SelectItem>
                           <SelectItem value="cpu" className="text-xs">CPU Only</SelectItem>
-                          <SelectItem value="cuda" className="text-xs">CUDA GPU (NVIDIA)</SelectItem>
-                          <SelectItem value="directml" className="text-xs">DirectML (AMD/Intel)</SelectItem>
+                          <SelectItem value="cuda" disabled className="text-xs">CUDA GPU (unavailable)</SelectItem>
+                          <SelectItem value="directml" disabled className="text-xs">DirectML (unavailable)</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
@@ -533,7 +501,7 @@ export function SplitterView() {
                         <SelectContent>
                           <SelectItem value="low-memory" className="text-xs">Low Memory</SelectItem>
                           <SelectItem value="balanced" className="text-xs">Balanced (Recommended)</SelectItem>
-                          <SelectItem value="thorough" className="text-xs">Thorough (Highest SDR)</SelectItem>
+                          <SelectItem value="thorough" className="text-xs">Thorough (More Overlap)</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
@@ -580,10 +548,10 @@ export function SplitterView() {
                             size="sm"
                             variant="outline"
                             className="h-6 text-[10px] gap-1 text-emerald-400 border-emerald-500/30"
-                            onClick={() => void auditCompliance()}
+                            onClick={() => setComplianceOpen(true)}
                           >
                             <ShieldCheck className="h-3 w-3" />
-                            Certify
+                            Audit history
                           </Button>
                         </div>
                       </div>
@@ -625,7 +593,7 @@ export function SplitterView() {
                     type="button"
                     className="w-full h-10 gap-2 font-medium"
                     onClick={startSeparation}
-                    disabled={!workerDetected || Boolean(activeInference) || checkingRuntime || selectedStems.length === 0}
+                    disabled={!workerDetected || Boolean(activeInference) || checkingRuntime || selectedStems.length !== 2 || !localModelPath || selectedPreset.architecture !== "mdx-net"}
                   >
                     {activeInference ? (
                       <>

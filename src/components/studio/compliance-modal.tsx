@@ -48,7 +48,8 @@ export function ComplianceModal({ open, onOpenChange }: ComplianceModalProps) {
 
   const totalOps = entries.length;
   const compliantCount = entries.filter((e) => e.loudnessMetrics?.ebuR128Compliant).length;
-  const passRate = totalOps > 0 ? Math.round((compliantCount / totalOps) * 100) : 100;
+  const measuredCount = entries.filter((e) => e.loudnessMetrics).length;
+  const passRate = measuredCount > 0 ? Math.round((compliantCount / measuredCount) * 100) : null;
 
   const copyToClipboard = (text: string, label: string) => {
     void navigator.clipboard.writeText(text);
@@ -70,11 +71,11 @@ export function ComplianceModal({ open, onOpenChange }: ComplianceModalProps) {
                 <DialogTitle className="text-base font-semibold flex items-center gap-2">
                   Enterprise Broadcast & Cryptographic Compliance
                   <Badge variant="outline" className="border-emerald-500/40 text-emerald-400 text-[10px]">
-                    EBU R128 Certified
+                    Measurement status only
                   </Badge>
                 </DialogTitle>
                 <DialogDescription className="text-xs text-muted-foreground">
-                  Cryptographic SHA-256 ledger and ITU-R BS.1770 broadcast loudness certification logs.
+                  Recorded audit metadata and measured loudness results. An entry is not an independent certification.
                 </DialogDescription>
               </div>
             </div>
@@ -91,10 +92,10 @@ export function ComplianceModal({ open, onOpenChange }: ComplianceModalProps) {
           </Card>
           <Card className="bg-card/40 border-border">
             <CardContent className="p-3">
-              <div className="text-[11px] font-medium text-muted-foreground">EBU R128 Compliance Rate</div>
+              <div className="text-[11px] font-medium text-muted-foreground">Measured EBU R128 Pass Rate</div>
               <div className="text-xl font-bold mt-0.5 flex items-center gap-1.5">
-                <span className={passRate >= 90 ? "text-emerald-400" : "text-amber-400"}>{passRate}%</span>
-                <span className="text-[11px] font-normal text-muted-foreground">({compliantCount}/{totalOps})</span>
+                <span className={passRate !== null && passRate >= 90 ? "text-emerald-400" : "text-amber-400"}>{passRate === null ? "N/A" : `${passRate}%`}</span>
+                <span className="text-[11px] font-normal text-muted-foreground">({compliantCount}/{measuredCount} measured)</span>
               </div>
             </CardContent>
           </Card>
@@ -103,7 +104,7 @@ export function ComplianceModal({ open, onOpenChange }: ComplianceModalProps) {
               <div className="text-[11px] font-medium text-muted-foreground">Target Broadcast Standard</div>
               <div className="text-xs font-semibold mt-1 text-foreground flex items-center gap-1">
                 <Award className="h-3.5 w-3.5 text-primary" />
-                -14.0 LUFS · True Peak ≤ -1.0 dBFS
+                -23 LUFS ±0.5 LU · TP ≤ -1 dBTP
               </div>
             </CardContent>
           </Card>
@@ -123,9 +124,9 @@ export function ComplianceModal({ open, onOpenChange }: ComplianceModalProps) {
             {entries.length === 0 ? (
               <div className="py-12 text-center text-xs text-muted-foreground">
                 <Layers className="h-8 w-8 mx-auto mb-2 opacity-30" />
-                No compliance operations recorded yet.
+                No audit entries recorded yet.
                 <p className="text-[11px] mt-1 opacity-70">
-                  Exporting audio, bouncing multi-track sessions, and running stem separations automatically log cryptographic audit entries here.
+                  Only operations that successfully record actual file hashes or audio measurements appear here.
                 </p>
               </div>
             ) : (
@@ -179,7 +180,7 @@ export function ComplianceModal({ open, onOpenChange }: ComplianceModalProps) {
                               {entry.loudnessMetrics.integratedLufs.toFixed(1)} LUFS
                             </span>
                             <span className="text-[10px] opacity-70 ml-1.5 font-mono">
-                              TP: {entry.loudnessMetrics.truePeakDb.toFixed(1)} dBFS
+                              TP: {entry.loudnessMetrics.truePeakDb.toFixed(1)} dBTP
                             </span>
                           </div>
                         ) : (
@@ -202,7 +203,7 @@ export function ComplianceModal({ open, onOpenChange }: ComplianceModalProps) {
                           )
                         ) : (
                           <Badge variant="outline" className="text-[10px] text-muted-foreground">
-                            LOGGED
+                            NOT MEASURED
                           </Badge>
                         )}
                       </div>

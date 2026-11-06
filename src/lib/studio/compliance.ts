@@ -70,15 +70,7 @@ export async function computeSha256(data: ArrayBuffer | Uint8Array): Promise<str
       // Fallback
     }
   }
-  // Fast deterministic fallback hash
-  let h1 = 0xdeadbeef ^ data.byteLength;
-  let h2 = 0x41c6ce57 ^ data.byteLength;
-  const u8 = data instanceof Uint8Array ? data : new Uint8Array(data);
-  for (let i = 0; i < u8.length; i += 32) {
-    h1 = Math.imul(h1 ^ u8[i], 2654435761);
-    h2 = Math.imul(h2 ^ u8[i], 1597334677);
-  }
-  return `${(h1 >>> 0).toString(16).padStart(8, "0")}${(h2 >>> 0).toString(16).padStart(8, "0")}`;
+  throw new Error("Cryptographic SHA-256 is unavailable in this runtime.");
 }
 
 /* ----------------------------- Compliance Store ---------------------------- */
@@ -166,11 +158,11 @@ export const useCompliance = create<ComplianceStore>((set, get) => ({
         e.output.name,
         e.output.sha256 || "N/A",
         e.output.durationSec?.toFixed(2) || "N/A",
-        e.output.format || "WAV",
-        e.output.sampleRate?.toString() || "44100",
+        e.output.format || "N/A",
+        e.output.sampleRate?.toString() || "N/A",
         e.loudnessMetrics?.integratedLufs.toFixed(1) || "N/A",
         e.loudnessMetrics?.truePeakDb.toFixed(1) || "N/A",
-        e.loudnessMetrics?.ebuR128Compliant ? "PASS" : "FAIL",
+        e.loudnessMetrics ? (e.loudnessMetrics.ebuR128Compliant ? "PASS" : "FAIL") : "NOT MEASURED",
       ]);
 
       const csvContent = [
@@ -200,9 +192,10 @@ function triggerDownload(content: string, filename: string, mime: string) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-/** Check whether measured loudness passes strict EBU R128 requirements (-14.0 LUFS ±0.5, TP <= -1.0 dBFS) */
+/** EBU R128 programme loudness: -23 LUFS ±0.5 LU, true peak ≤ -1 dBTP.
+ * Pass actual whole-programme BS.1770 measurements, never estimated values.
+ */
 export function evaluateEbuR128Compliance(lufs: number, truePeakDb: number): boolean {
-  const lufsPass = lufs >= -15.5 && lufs <= -13.0;
-  const truePeakPass = truePeakDb <= -0.9;
-  return lufsPass && truePeakPass;
+  return Number.isFinite(lufs) && Number.isFinite(truePeakDb) &&
+    lufs >= -23.5 && lufs <= -22.5 && truePeakDb <= -1.0;
 }

@@ -10,15 +10,15 @@ console.log("PASS: 256-bit cryptographic SHA-256 hash verified (64 hex character
 
 // Test 2: EBU R128 compliance logic
 function evaluateEbuR128(lufs, truePeakDb) {
-  const lufsPass = lufs >= -15.5 && lufs <= -13.0;
-  const truePeakPass = truePeakDb <= -0.9;
+  const lufsPass = lufs >= -23.5 && lufs <= -22.5;
+  const truePeakPass = truePeakDb <= -1.0;
   return lufsPass && truePeakPass;
 }
 
-assert.equal(evaluateEbuR128(-14.0, -1.0), true, "Standard streaming delivery (-14 LUFS, -1 TP) must PASS");
-assert.equal(evaluateEbuR128(-13.5, -1.2), true, "Within ±0.5 LU tolerance must PASS");
-assert.equal(evaluateEbuR128(-14.0, -0.2), false, "True peak clipping risk must FAIL");
-assert.equal(evaluateEbuR128(-18.0, -1.0), false, "Overly quiet signal must FAIL");
+assert.equal(evaluateEbuR128(-23.0, -1.0), true, "EBU broadcast target must PASS");
+assert.equal(evaluateEbuR128(-22.5, -1.2), true, "Within ±0.5 LU tolerance must PASS");
+assert.equal(evaluateEbuR128(-23.0, -0.2), false, "True peak clipping risk must FAIL");
+assert.equal(evaluateEbuR128(-14.0, -1.0), false, "Streaming target is not EBU R128 compliant");
 console.log("PASS: EBU R128 and ITU-R BS.1770 loudness evaluation rules verified");
 
 // Test 3: CSV and JSON Compliance Ledger Serialization
@@ -33,7 +33,7 @@ const mockEntry = {
   durationSec: 214.5,
   format: "wav24",
   sampleRate: 48000,
-  integratedLufs: -14.0,
+  integratedLufs: -23.0,
   truePeakDb: -1.0,
   ebuR128Compliant: true,
 };

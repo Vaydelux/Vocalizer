@@ -34,6 +34,8 @@ jobs:
         run: bun run typecheck
       - name: Check Electron TypeScript
         run: bun run typecheck:electron
+      - name: Studio TypeScript unit tests
+        run: bun run test
       - name: Verify Python syntax
         run: python -m compileall -q inference/worker scripts/verify-separation.py
       - name: Worker protocol and cancellation tests
@@ -42,6 +44,16 @@ jobs:
         run: bun run electron:build-renderer
       - name: Compile Electron
         run: bun run electron:compile
+      - name: Assert bundled sandbox preload bridge
+        run: node scripts/test-preload-bundle.mjs
+      - name: Test new DAW and compliance regression suites
+        run: |
+          node scripts/test-compliance-report.mjs
+          node scripts/test-mixer-bounce.mjs
+          node scripts/test-spatial-mix.mjs
+          node scripts/test-automation-bounce.mjs
+          node scripts/test-batch-recipe.mjs
+          node scripts/test-lossless-trim.mjs
       - name: Test safe native export finalization
         run: node scripts/test-safe-export.mjs
       - name: Test native FFmpeg cancellation during verification
