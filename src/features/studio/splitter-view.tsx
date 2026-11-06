@@ -10,7 +10,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { finishStemRoute, hasRoutedStemJob, reserveStemRoute, shouldAutoRouteStemJob } from "@/lib/studio/stem-routing";
+import { finishStemRoute, hasRoutedStemJob, markAutoStemAttempt, pendingStemNames, reserveStemRoute, shouldAutoRouteStemJob } from "@/lib/studio/stem-routing";
 import {
   Split,
   FileAudio2,
@@ -240,10 +240,13 @@ export function SplitterView() {
     if (!completedStems?.result?.stemFiles || !track) return;
     const jobId = completedStems.id;
     if (!reserveStemRoute(jobId)) return;
-    let addedCount = 0;
+    const addedStems: ModelStem[] = [];
+    const allStemNames = completedStems.result.stemFiles.map((item) => item.stem);
     try {
+      const missing = new Set(pendingStemNames(jobId, allStemNames));
       for (const item of completedStems.result.stemFiles) {
         const stemName = item.stem;
+        if (!missing.has(stemName)) continue;
         const url = `las://renderer/__stem-audio/${encodeURIComponent(jobId)}/${stemName}`;
         try {
           const resp = await fetch(url);
@@ -273,7 +276,7 @@ export function SplitterView() {
           if (!useMixer.getState().lanes.some((lane) => lane.trackId === created.id)) {
             throw new Error("Could not create a mixer lane for this stem.");
           }
-          addedCount++;
+          addedStems.push(stemName);
         } catch (error) {
           toast.error(`Could not import ${stemName} into mixer`, {
             description: error instanceof Error ? error.message : "Unexpected mixer import error.",
@@ -281,23 +284,27 @@ export function SplitterView() {
         }
       }
     } finally {
-      finishStemRoute(jobId, addedCount > 0);
+      finishStemRoute(jobId, addedStems);
       refreshRouteStatus((n) => n + 1);
     }
-    if (addedCount > 0) {
-      toast.success(`Sent ${addedCount} stems to Multi-Track Mixer`, {
-        description: "Opened in the DAW console with volume, pan and DSP controls.",
-      });
+    const remaining = pendingStemNames(jobId, allStemNames);
+    if (remaining.length === 0) {
+      toast.success("All separated stems are in the Multi-Track Mixer");
       setView("mixer");
+    } else if (addedStems.length > 0) {
+      toast.warning(`Imported ${addedStems.length} stem(s); ${remaining.length} need retry`, {
+        description: "Use Retry Missing Stems to import only the remaining outputs.",
+      });
     } else {
-      toast.error("No stems could be imported; completed output files are still available on disk.");
+      toast.error("No additional stems could be imported; completed files remain on disk.");
     }
   }, [completedStems, track, addLane, setView]);
 
   // The checkbox now triggers the latest completed job on its source track.
   // The module-level routing ledger remains valid when this page unmounts.
   useEffect(() => {
-    if (shouldAutoRouteStemJob(autoRouteToMixer, lastJobId, trackId, completedStems)) {
+    if (shouldAutoRouteStemJob(autoRouteToMixer, lastJobId, trackId, completedStems) &&
+        completedStems && markAutoStemAttempt(completedStems.id)) {
       void sendStemsToMixer();
     }
   }, [autoRouteToMixer, lastJobId, trackId, completedStems, sendStemsToMixer]);
@@ -576,10 +583,13 @@ export function SplitterView() {
                             variant="outline"
                             className="h-6 text-[10px] gap-1"
                             onClick={() => void sendStemsToMixer()}
-                            disabled={hasRoutedStemJob(completedStems.id)}
+                            disabled={hasRoutedStemJob(completedStems.id, completedStems.result.stemFiles.map((item) => item.stem))}
                           >
                             <SlidersHorizontal className="h-3 w-3" />
-                            {hasRoutedStemJob(completedStems.id) ? "Already in Mixer" : "Send to Mixer"}
+                            {hasRoutedStemJob(completedStems.id, completedStems.result.stemFiles.map((item) => item.stem))
+                               ? "Already in Mixer"
+                               : pendingStemNames(completedStems.id, completedStems.result.stemFiles.map((item) => item.stem)).length < completedStems.result.stemFiles.length
+                                 ? "Retry Missing Stems" : "Send to Mixer"}
                           </Button>
                           <Button
                             type="button"
