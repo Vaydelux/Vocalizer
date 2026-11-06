@@ -45,6 +45,7 @@ import { Slider } from "@/components/ui/slider";
 import { useSettings } from "@/lib/studio/store-settings";
 import { cachePeaks, computePeaks, getCachedPeaks, type Peaks } from "@/lib/studio/peaks";
 import { decodeFile } from "@/lib/studio/decode";
+import { mayComputeFullWaveform, shouldPreloadMetadataOnly } from "@/lib/studio/waveform-policy";
 import { formatTime } from "@/lib/studio/format";
 import type { AudioTrack } from "@/lib/studio/types";
 import { cn } from "@/lib/utils";
@@ -125,7 +126,7 @@ const WavePlayerImpl: ForwardRefRenderFunction<WavePlayerHandle, Props> = (
     let cancelled = false;
     const audio = new Audio();
     audio.crossOrigin = "anonymous";
-    audio.preload = "auto";
+    audio.preload = shouldPreloadMetadataOnly(track) ? "metadata" : "auto";
     audioRef.current = audio;
     audio.volume = muted ? 0 : volume;
 
@@ -185,6 +186,9 @@ const WavePlayerImpl: ForwardRefRenderFunction<WavePlayerHandle, Props> = (
           }
           return;
         }
+        // Never materialize >150 MiB or disk-backed stems into PCM just to
+        // draw optional waveform peaks. HTML media still provides playback.
+        if (!mayComputeFullWaveform(track)) return;
         const { buffer } = await decodeFile(track.file);
         if (cancelled) return;
         const peaks = await computePeaks(buffer);
