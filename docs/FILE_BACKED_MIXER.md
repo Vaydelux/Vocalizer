@@ -128,3 +128,27 @@ displays. This is a structural CPU/rendering optimization, **not** a measured
 claim of better frame times or GPU memory consumption. A clean Windows GUI
 test should verify active playback, stopped seek, zoom/scroll, region edits,
 track switching, and 60+ minute sessions on normal and high-DPI monitors.
+
+## Incremental waveform peaks and cancellation
+
+For small browser-decodable audio, waveform envelopes are now extracted in
+**128-bucket batches** (40 buckets/s visual density), yielding to the event loop
+between batches rather than blocking for an entire channel. Each batch checks
+the active abort signal: switching sources or unmounting the player aborts
+pending peak analysis. The browser metadata preflight also releases its
+object URL and timeout immediately on cancellation, before any full file read.
+Once an in-flight Web Audio decoder has started it cannot be forcibly
+interrupted, but results from abandoned work are not published.
+
+Peak cache entries bind both the track ID and its current media URL, preventing
+relinked project audio from inheriting an old waveform when it retains its
+track ID. An LRU limit keeps at most **32 MiB** of Float32 peak envelopes, with
+older entries evicted; re-opening an evicted track may require peak regeneration.
+Each bucket's sample boundaries are proportional to total decoded samples,
+including the final sample, rather than repeatedly dropping fractional tails.
+
+This improves responsiveness and peak-cache reliability. Large file-backed
+AI stems still use metadata-only preview without renderer full-file decoding.
+It does **not** add waveform peak extraction from multi-GB files; that would
+require a separate bounded native FFmpeg peak service. Manual long-session
+GUI testing remains a release gate.
