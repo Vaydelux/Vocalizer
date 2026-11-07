@@ -68,7 +68,9 @@ async function decodeAfterPreflight(file: File, signal?: AbortSignal): Promise<D
   if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
   const ctx = getDecodeContext();
   try {
-    const buffer = await ctx.decodeAudioData(bytes.slice(0));
+    // decodeAudioData may detach its ArrayBuffer. This is the only owner of
+    // the input bytes, so avoid allocating another full compressed copy.
+    const buffer = await ctx.decodeAudioData(bytes);
     return {
       buffer,
       meta: {
