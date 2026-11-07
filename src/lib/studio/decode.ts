@@ -49,7 +49,7 @@ export async function decodeFile(file: File, signal?: AbortSignal): Promise<Deco
     throw studioError("FILE_TOO_LARGE", "File exceeds the safe browser decode size. Use native FFmpeg processing.");
   }
   if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
-  const preflight = await probeViaElement(file);
+  const preflight = await probeViaElement(file, signal);
   if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
   if (!mayDecodeBrowserAudio(file.size, preflight.duration)) {
     throw studioError("FILE_TOO_LARGE", "Measured audio duration would exceed the browser PCM memory budget. Use the native desktop engine.");
@@ -71,6 +71,7 @@ async function decodeAfterPreflight(file: File, signal?: AbortSignal): Promise<D
     // decodeAudioData may detach its ArrayBuffer. This is the only owner of
     // the input bytes, so avoid allocating another full compressed copy.
     const buffer = await ctx.decodeAudioData(bytes);
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
     return {
       buffer,
       meta: {
@@ -85,6 +86,7 @@ async function decodeAfterPreflight(file: File, signal?: AbortSignal): Promise<D
       },
     };
   } catch (err) {
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
     throw studioError(
       "UNSUPPORTED_MEDIA",
       `${file.name}: decoder rejected the stream`,
@@ -110,44 +112,63 @@ export async function probeMetadata(file: File): Promise<AudioMeta> {
   return meta;
 }
 
-/** Duration-only probe using an <audio> element. Honest about what it can't know. */
-export function probeViaElement(file: File): Promise<AudioMeta> {
+/** Duration-only probe, abortable to release its temporary media URL. */
+export function probeViaElement(file: File, signal?: AbortSignal): Promise<AudioMeta> {
   return new Promise<AudioMeta>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException("Aborted", "AbortError"));
+      return;
+    }
     const url = URL.createObjectURL(file);
     const el = document.createElement("audio");
+    let settled = false;
     const cleanup = () => {
-      URL.revokeObjectURL(url);
+      window.clearTimeout(timeout);
+      signal?.removeEventListener("abort", onAbort);
+      el.onloadedmetadata = null;
+      el.onerror = null;
       el.removeAttribute("src");
+      URL.revokeObjectURL(url);
     };
-    const timeout = window.setTimeout(() => {
+    const finish = (complete: () => void) => {
+      if (settled) return;
+      settled = true;
       cleanup();
-      reject(studioError("DECODE_FAILED", `${file.name}: metadata probe timed out`));
+      complete();
+    };
+    const onAbort = () => finish(() => reject(new DOMException("Aborted", "AbortError")));
+    const timeout = window.setTimeout(() => {
+      finish(() => reject(studioError("DECODE_FAILED", `${file.name}: metadata probe timed out`)));
     }, 20000);
+
     el.preload = "metadata";
     el.onloadedmetadata = () => {
-      window.clearTimeout(timeout);
       const duration = Number.isFinite(el.duration) ? el.duration : 0;
-      cleanup();
-      if (duration <= 0) {
-        reject(studioError("UNSUPPORTED_MEDIA", `${file.name}: no readable audio duration`));
-        return;
-      }
-      resolve({
-        duration,
-        sampleRate: null,
-        channels: null,
-        lengthSamples: null,
-        effectiveBitrateKbps: Math.round((file.size * 8) / duration / 1000),
-        probeNote:
-          "Duration measured via media element without full PCM allocation. Sample rate and channel count not probed — reported as unknown rather than guessed.",
-        metaSource: "element",
+      finish(() => {
+        if (duration <= 0) {
+          reject(studioError("UNSUPPORTED_MEDIA", `${file.name}: no readable audio duration`));
+          return;
+        }
+        resolve({
+          duration,
+          sampleRate: null,
+          channels: null,
+          lengthSamples: null,
+          effectiveBitrateKbps: Math.round((file.size * 8) / duration / 1000),
+          probeNote:
+            "Duration measured via media element without full PCM allocation. Sample rate and channel count not probed — reported as unknown rather than guessed.",
+          metaSource: "element",
+        });
       });
     };
     el.onerror = () => {
-      window.clearTimeout(timeout);
-      cleanup();
-      reject(studioError("UNSUPPORTED_MEDIA", `${file.name}: media element could not read it`));
+      finish(() => reject(studioError("UNSUPPORTED_MEDIA", `${file.name}: media element could not read it`)));
     };
+    signal?.addEventListener("abort", onAbort, { once: true });
+    if (signal?.aborted) {
+      onAbort();
+      return;
+    }
     el.src = url;
   });
 }
