@@ -46,7 +46,8 @@ import { Slider } from "@/components/ui/slider";
 import { useSettings } from "@/lib/studio/store-settings";
 import { cachePeaks, computePeaks, getCachedPeaks, type Peaks } from "@/lib/studio/peaks";
 import { decodeFile } from "@/lib/studio/decode";
-import { MAX_WAVEFORM_RASTER_PX, planWaveformViewport, waveformTimeAtPointer } from "@/lib/studio/waveform-viewport";
+import { planWaveformViewport, waveformTimeAtPointer } from "@/lib/studio/waveform-viewport";
+import { planWaveformRaster } from "@/lib/studio/waveform-raster";
 import { mayComputeFullWaveform, shouldPreloadMetadataOnly } from "@/lib/studio/waveform-policy";
 import { formatTime } from "@/lib/studio/format";
 import type { AudioTrack } from "@/lib/studio/types";
@@ -85,11 +86,32 @@ function clamp(v: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, v));
 }
 
+/** The two overlaid canvases share exact bitmaps and CSS dimensions. */
+function prepareCanvas(
+  canvas: HTMLCanvasElement,
+  cssW: number,
+  cssH: number,
+): CanvasRenderingContext2D | null {
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  const raster = planWaveformRaster(cssW, cssH, window.devicePixelRatio || 1);
+  // Updating canvas dimensions resets the bitmap. Never do so on every
+  // animation frame when only the playhead has moved.
+  if (canvas.width !== raster.width) canvas.width = raster.width;
+  if (canvas.height !== raster.height) canvas.height = raster.height;
+  if (canvas.style.width !== `${cssW}px`) canvas.style.width = `${cssW}px`;
+  if (canvas.style.height !== `${cssH}px`) canvas.style.height = `${cssH}px`;
+  ctx.setTransform(raster.scale, 0, 0, raster.scale, 0, 0);
+  ctx.clearRect(0, 0, cssW, cssH);
+  return ctx;
+}
+
 const WavePlayerImpl: ForwardRefRenderFunction<WavePlayerHandle, Props> = (
   { track, height = 128, withRegion = false, onRegionChange, onLoopChange, onTimeChange, className },
   ref
 ) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const playerRef = useRef<HTMLDivElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -97,9 +119,11 @@ const WavePlayerImpl: ForwardRefRenderFunction<WavePlayerHandle, Props> = (
   const regionRef = useRef<RegionRange | null>(null);
   const loopRef = useRef(false);
   const rafRef = useRef<number>(0);
+  const scrollRafRef = useRef<number>(0);
   const dragRef = useRef<{ active: boolean; startX: number; moved: boolean } | null>(null);
 
   const [ready, setReady] = useState(false);
+  const [peakVersion, setPeakVersion] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -186,6 +210,7 @@ const WavePlayerImpl: ForwardRefRenderFunction<WavePlayerHandle, Props> = (
         if (cached) {
           if (!cancelled) {
             peaksRef.current = cached;
+            setPeakVersion((v) => v + 1);
             setDuration(cached.duration);
             setReady(true);
           }
@@ -200,6 +225,7 @@ const WavePlayerImpl: ForwardRefRenderFunction<WavePlayerHandle, Props> = (
         if (cancelled) return;
         peaksRef.current = peaks;
         cachePeaks(track.id, peaks);
+        setPeakVersion((v) => v + 1);
         setDuration((d) => (d > 0 ? d : peaks.duration));
         setReady(true);
       } catch (err) {
@@ -229,32 +255,19 @@ const WavePlayerImpl: ForwardRefRenderFunction<WavePlayerHandle, Props> = (
     };
   }, [track.id, track.url]); // Relinked project tracks preserve ID but receive a new media URL.
 
-  /* ------------------------------ canvas rendering --------------------------- */
-  const draw = useCallback(() => {
+  /* ------------------------------ layered waveform rendering --------------------------- */
+  // Static peaks are repainted only on source, zoom, resize or scroll changes.
+  // Playhead/selection uses its own transparent canvas for cheap 60 Hz updates.
+  const drawWaveform = useCallback(() => {
     const canvas = canvasRef.current;
-    const peaks = peaksRef.current;
     if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    // The bitmap covers only the visible scrolling viewport, never the
-    // entire (possibly multi-million-pixel) recording timeline.
     const cssW = viewport.viewportWidth;
     const cssH = height;
-    const requestedDpr = Math.min(window.devicePixelRatio || 1, 2);
-    const rasterScale = Math.max(0.01, Math.min(requestedDpr, MAX_WAVEFORM_RASTER_PX / cssW));
-    // Assigning canvas.width/height resets the entire bitmap and graphics
-    // state. Avoid reallocating it for every 60 Hz playhead frame.
-    const rasterW = Math.max(1, Math.ceil(cssW * rasterScale));
-    const rasterH = Math.max(1, Math.ceil(cssH * rasterScale));
-    if (canvas.width !== rasterW) canvas.width = rasterW;
-    if (canvas.height !== rasterH) canvas.height = rasterH;
-    if (canvas.style.width !== `${cssW}px`) canvas.style.width = `${cssW}px`;
-    if (canvas.style.height !== `${cssH}px`) canvas.style.height = `${cssH}px`;
-    ctx.setTransform(rasterScale, 0, 0, rasterScale, 0, 0);
-    ctx.clearRect(0, 0, cssW, cssH);
+    const ctx = prepareCanvas(canvas, cssW, cssH);
+    if (!ctx) return;
+    const peaks = peaksRef.current;
     const pxPerSec = viewport.pixelsPerSecond;
     const scrollX = scrollRef.current?.scrollLeft ?? 0;
-
     // Mid line
     ctx.fillStyle = WAVE_COLOR;
     const mid = cssH / 2;
@@ -305,7 +318,17 @@ const WavePlayerImpl: ForwardRefRenderFunction<WavePlayerHandle, Props> = (
       // No peaks (e.g., file too large to decode): honest flat line.
       ctx.fillRect(0, mid, cssW, 1);
     }
+  }, [viewport, height]);
 
+  const drawOverlay = useCallback(() => {
+    const canvas = overlayCanvasRef.current;
+    if (!canvas) return;
+    const cssW = viewport.viewportWidth;
+    const cssH = height;
+    const ctx = prepareCanvas(canvas, cssW, cssH);
+    if (!ctx) return;
+    const pxPerSec = viewport.pixelsPerSecond;
+    const scrollX = scrollRef.current?.scrollLeft ?? 0;
     // Region overlay
     const r = regionRef.current;
     if (r && duration > 0) {
@@ -333,24 +356,52 @@ const WavePlayerImpl: ForwardRefRenderFunction<WavePlayerHandle, Props> = (
     }
   }, [viewport, height, duration]);
 
-  // Redraw on state/data changes.
+  const draw = useCallback(() => {
+    drawWaveform();
+    drawOverlay();
+  }, [drawWaveform, drawOverlay]);
+
+  // Coalesce a burst of scroll events into one static viewport repaint/frame.
+  const onViewportScroll = useCallback(() => {
+    if (scrollRafRef.current) return;
+    scrollRafRef.current = requestAnimationFrame(() => {
+      scrollRafRef.current = 0;
+      draw();
+    });
+  }, [draw]);
+
+  useEffect(() => () => cancelAnimationFrame(scrollRafRef.current), []);
+
+  // Static peaks only change with source, cache, duration, zoom or viewport.
+  // Selection dragging should never force a second full-peaks traversal.
   useEffect(() => {
     draw();
-  }, [draw, ready, region, zoom]);
+  }, [draw, ready, peakVersion]);
 
-  // rAF playhead during playback (cheap: only redraws playhead column range).
+  // Region updates and pointer selection repaint only the cheap overlay.
+  useEffect(() => {
+    drawOverlay();
+  }, [region, drawOverlay]);
+
+  // Only the lightweight overlay updates every frame during playback.
   useEffect(() => {
     if (!playing) {
       cancelAnimationFrame(rafRef.current);
+      drawOverlay();
       return;
     }
     const tick = () => {
-      draw();
+      drawOverlay();
       rafRef.current = requestAnimationFrame(tick);
     };
     rafRef.current = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafRef.current);
-  }, [playing, draw]);
+  }, [playing, drawOverlay]);
+
+  // Seeking while paused must update the playhead even without an rAF loop.
+  useEffect(() => {
+    if (!playing) drawOverlay();
+  }, [currentTime, playing, drawOverlay]);
 
   /* ------------------------------ region helpers ----------------------------- */
   const setRegionAndNotify = useCallback(
@@ -358,9 +409,9 @@ const WavePlayerImpl: ForwardRefRenderFunction<WavePlayerHandle, Props> = (
       regionRef.current = range;
       setRegionState(range);
       onRegionChange?.(range);
-      draw();
+      drawOverlay();
     },
-    [onRegionChange, draw]
+    [onRegionChange, drawOverlay]
   );
 
   /* --------------------------------- controls -------------------------------- */
@@ -453,7 +504,7 @@ const WavePlayerImpl: ForwardRefRenderFunction<WavePlayerHandle, Props> = (
   /* ----------------------------- pointer interactions ------------------------ */
   const timeFromX = useCallback(
     (clientX: number): number => {
-      const canvas = canvasRef.current;
+      const canvas = overlayCanvasRef.current;
       const scroll = scrollRef.current;
       if (!canvas || !scroll) return 0;
       const rect = canvas.getBoundingClientRect();
@@ -495,10 +546,10 @@ const WavePlayerImpl: ForwardRefRenderFunction<WavePlayerHandle, Props> = (
         regionRef.current = { start: lo, end: hi };
         setRegionState({ start: lo, end: hi });
         onRegionChange?.({ start: lo, end: hi });
-        draw();
+        drawOverlay();
       }
     },
-    [withRegion, timeFromX, onRegionChange, draw]
+    [withRegion, timeFromX, onRegionChange, drawOverlay]
   );
 
   const onPointerUp = useCallback(
@@ -593,35 +644,43 @@ const WavePlayerImpl: ForwardRefRenderFunction<WavePlayerHandle, Props> = (
   return (
     <div ref={playerRef} className={cn("rounded-xl border border-border bg-card", className)}>
       <div className="relative px-4 pt-4">
-        <div ref={scrollRef} className="studio-scroll relative w-full overflow-x-auto overflow-y-hidden" style={{ height }} onScroll={draw}>
+        <div ref={scrollRef} className="studio-scroll relative w-full overflow-x-auto overflow-y-hidden" style={{ height }} onScroll={onViewportScroll}>
           <div className="relative" style={{ width: viewport.timelineWidth, height }}>
-          <canvas
-            ref={canvasRef}
-            onPointerDown={onPointerDown}
-            onPointerMove={onPointerMove}
-            onPointerUp={onPointerUp}
-            className="sticky left-0 block touch-none cursor-pointer"
-            role="slider"
-            aria-label="Waveform — click to seek, drag to select a region"
-            aria-valuemin={0}
-            aria-valuemax={Math.round(duration)}
-            aria-valuenow={Math.round(currentTime)}
-            aria-valuetext={`${formatTime(currentTime)} of ${formatTime(duration)}`}
-            tabIndex={ready ? 0 : -1}
-            onKeyDown={(event) => {
-              if (!ready) return;
-              if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
-                event.preventDefault();
-                event.stopPropagation();
-                seek(currentTime + (event.key === "ArrowRight" ? 2 : -2));
-              } else if (event.key === "Home" || event.key === "End") {
-                event.preventDefault();
-                event.stopPropagation();
-                seek(event.key === "Home" ? 0 : duration);
-              }
-            }}
-            style={{ height }}
-          />
+            <div className="sticky left-0" style={{ width: viewport.viewportWidth, height }}>
+              <canvas
+                ref={canvasRef}
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-0 block"
+                style={{ height }}
+              />
+              <canvas
+                ref={overlayCanvasRef}
+                onPointerDown={onPointerDown}
+                onPointerMove={onPointerMove}
+                onPointerUp={onPointerUp}
+                className="absolute inset-0 block touch-none cursor-pointer"
+                role="slider"
+                aria-label="Waveform — click to seek, drag to select a region"
+                aria-valuemin={0}
+                aria-valuemax={Math.round(duration)}
+                aria-valuenow={Math.round(currentTime)}
+                aria-valuetext={`${formatTime(currentTime)} of ${formatTime(duration)}`}
+                tabIndex={ready ? 0 : -1}
+                onKeyDown={(event) => {
+                  if (!ready) return;
+                  if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    seek(currentTime + (event.key === "ArrowRight" ? 2 : -2));
+                  } else if (event.key === "Home" || event.key === "End") {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    seek(event.key === "Home" ? 0 : duration);
+                  }
+                }}
+                style={{ height }}
+              />
+            </div>
           </div>
         </div>
         {!ready && !error && (
