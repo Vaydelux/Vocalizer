@@ -20,7 +20,9 @@ export function planWaveformRaster(
   const dpr = Number.isFinite(devicePixelRatio)
     ? Math.max(0.1, Math.min(devicePixelRatio, 2)) : 1;
   // Also bound the vertical raster for unusually tall view configurations.
-  const scale = Math.max(0.01, Math.min(dpr, MAX_WAVEFORM_RASTER_PX / width, 4096 / height));
+  // The cap must hold even at extreme zoom/device sizes; a nonzero
+  // minimum scale would accidentally allow an oversized bitmap.
+  const scale = Math.min(dpr, MAX_WAVEFORM_RASTER_PX / width, 4096 / height);
   return {
     width: Math.max(1, Math.ceil(width * scale)),
     height: Math.max(1, Math.ceil(height * scale)),
