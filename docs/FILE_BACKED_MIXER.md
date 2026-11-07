@@ -107,3 +107,24 @@ A real long-session Windows GUI check should include scroll/zoom/seek across
 a two-hour source, high-DPI monitors, project reopen, and resizing during
 playback. CI unit coverage checks timeline calculations, not physical UI GPU
 memory usage.
+
+## Layered waveform painting (experimental)
+
+The shared WavePlayer now paints two aligned, independently bounded canvas
+bitmaps: a static waveform underneath and a transparent interaction overlay
+above it. Peak extraction and the rendered waveform are refreshed only when
+the source, peaks, zoom, viewport dimensions or visible scroll area change.
+Continuous playback updates only selection/playhead pixels in the overlay,
+not all peak buckets at animation-frame frequency. Rapid scroll events are
+coalesced to at most one viewport repaint per animation frame.
+
+The overlay remains the accessible keyboard/pointer slider (including
+shift-drag selection and scroll-relative seeking). The waveform canvas is
+marked `aria-hidden` and does not intercept pointer events. A blank peak
+layer is intentional for large disk-backed stems without computed peaks.
+
+The shared raster policy caps both layers consistently, including high-DPI
+displays. This is a structural CPU/rendering optimization, **not** a measured
+claim of better frame times or GPU memory consumption. A clean Windows GUI
+test should verify active playback, stopped seek, zoom/scroll, region edits,
+track switching, and 60+ minute sessions on normal and high-DPI monitors.
