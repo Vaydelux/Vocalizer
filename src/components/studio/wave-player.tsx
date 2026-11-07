@@ -153,6 +153,8 @@ const WavePlayerImpl: ForwardRefRenderFunction<WavePlayerHandle, Props> = (
   /* ------------------------------- audio setup ------------------------------- */
   useEffect(() => {
     let cancelled = false;
+    // A discarded player must stop incremental peak work, not just ignore it.
+    const peakAbort = new AbortController();
     const audio = new Audio();
     audio.crossOrigin = "anonymous";
     audio.preload = shouldPreloadMetadataOnly(track) ? "metadata" : "auto";
@@ -206,7 +208,7 @@ const WavePlayerImpl: ForwardRefRenderFunction<WavePlayerHandle, Props> = (
     // Decode for waveform peaks (cached). Large files may skip — playback still works.
     void (async () => {
       try {
-        const cached = getCachedPeaks(track.id);
+        const cached = getCachedPeaks(track.id, track.url);
         if (cached) {
           if (!cancelled) {
             peaksRef.current = cached;
@@ -216,20 +218,20 @@ const WavePlayerImpl: ForwardRefRenderFunction<WavePlayerHandle, Props> = (
           }
           return;
         }
-        // Never materialize >150 MiB or disk-backed stems into PCM just to
-        // draw optional waveform peaks. HTML media still provides playback.
+        // The browser PCM policy already bounds compressed size and measured
+        // duration. Large and disk-backed files remain media-element-only.
         if (!mayComputeFullWaveform(track)) return;
-        const { buffer } = await decodeFile(track.file);
-        if (cancelled) return;
-        const peaks = await computePeaks(buffer);
-        if (cancelled) return;
+        const { buffer } = await decodeFile(track.file, peakAbort.signal);
+        if (cancelled || peakAbort.signal.aborted) return;
+        const peaks = await computePeaks(buffer, peakAbort.signal);
+        if (cancelled || peakAbort.signal.aborted) return;
         peaksRef.current = peaks;
-        cachePeaks(track.id, peaks);
+        cachePeaks(track.id, peaks, track.url);
         setPeakVersion((v) => v + 1);
         setDuration((d) => (d > 0 ? d : peaks.duration));
         setReady(true);
       } catch (err) {
-        if (!cancelled) {
+        if (!cancelled && !peakAbort.signal.aborted) {
           // Non-fatal: playback works without a waveform; show a flat line.
           console.warn("[wave-player] peak decode skipped:", err);
         }
@@ -238,6 +240,7 @@ const WavePlayerImpl: ForwardRefRenderFunction<WavePlayerHandle, Props> = (
 
     return () => {
       cancelled = true;
+      peakAbort.abort();
       cancelAnimationFrame(rafRef.current);
       audio.removeEventListener("loadstart", onLoadStart);
       audio.removeEventListener("loadedmetadata", onLoaded);
