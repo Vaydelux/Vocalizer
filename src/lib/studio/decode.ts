@@ -5,15 +5,15 @@
  * platform decoder — not by trusting the filename extension (matches the
  * spec's "validate using supported decoders, not extensions").
  *
- * Size policy: decodeAudioData materializes the full PCM in memory. Files above
- * MAX_DECODE_BYTES fall back to <audio> metadata (duration only) and the UI
- * labels the reduced probe instead of pretending to know sample rate/channels.
+ * Memory policy: preflight media duration before decodeAudioData. Files that
+ * exceed the compressed input or projected PCM budget retain measured metadata
+ * without materializing the entire recording in browser memory.
  */
 
 import { studioError } from "./errors";
 import type { AudioMeta } from "./types";
-
-export const MAX_DECODE_BYTES = 150 * 1024 * 1024; // 150 MB safety cap for full PCM decode
+import { MAX_DECODE_BYTES, mayDecodeBrowserAudio } from "./decode-budget";
+export { MAX_DECODE_BYTES } from "./decode-budget";
 
 let sharedCtx: AudioContext | null = null;
 
@@ -40,11 +40,25 @@ export interface DecodeResult {
   meta: AudioMeta;
 }
 
-/** Decode a file into an AudioBuffer with authoritative metadata. Throws typed errors. */
+/** Decode only after a measured media duration passes the memory guardrail. */
 export async function decodeFile(file: File, signal?: AbortSignal): Promise<DecodeResult> {
   if (file.size === 0) {
     throw studioError("CORRUPT_FILE", `${file.name}: 0 bytes`, "File is empty.");
   }
+  if (file.size > MAX_DECODE_BYTES) {
+    throw studioError("FILE_TOO_LARGE", "File exceeds the safe browser decode size. Use native FFmpeg processing.");
+  }
+  if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+  const preflight = await probeViaElement(file);
+  if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+  if (!mayDecodeBrowserAudio(file.size, preflight.duration)) {
+    throw studioError("FILE_TOO_LARGE", "Measured audio duration would exceed the browser PCM memory budget. Use the native desktop engine.");
+  }
+  return decodeAfterPreflight(file, signal);
+}
+
+/** Private: callers must have already completed duration and size preflight. */
+async function decodeAfterPreflight(file: File, signal?: AbortSignal): Promise<DecodeResult> {
   let bytes: ArrayBuffer;
   try {
     bytes = await file.arrayBuffer();
@@ -54,7 +68,9 @@ export async function decodeFile(file: File, signal?: AbortSignal): Promise<Deco
   if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
   const ctx = getDecodeContext();
   try {
-    const buffer = await ctx.decodeAudioData(bytes.slice(0));
+    // decodeAudioData may detach its ArrayBuffer. This is the only owner of
+    // the input bytes, so avoid allocating another full compressed copy.
+    const buffer = await ctx.decodeAudioData(bytes);
     return {
       buffer,
       meta: {
@@ -78,16 +94,19 @@ export async function decodeFile(file: File, signal?: AbortSignal): Promise<Deco
 }
 
 /**
- * Metadata probe without keeping the decoded buffer: decodes, extracts meta,
- * then releases. Falls back to HTMLAudioElement for very large files.
+ * Metadata always starts with a lightweight media-element duration probe.
+ * A small *compressed* input may still contain hours of decoded PCM, so
+ * only suitable sources proceed to the full browser decoder.
  */
 export async function probeMetadata(file: File): Promise<AudioMeta> {
-  if (file.size <= MAX_DECODE_BYTES) {
-    const { buffer, meta } = await decodeFile(file);
-    void buffer; // decoded buffer is released when this scope exits
-    return meta;
+  if (file.size === 0) {
+    throw studioError("CORRUPT_FILE", `${file.name}: 0 bytes`, "File is empty.");
   }
-  const meta = await probeViaElement(file);
+  const preflight = await probeViaElement(file);
+  if (!mayDecodeBrowserAudio(file.size, preflight.duration)) {
+    return preflight;
+  }
+  const { meta } = await decodeAfterPreflight(file);
   return meta;
 }
 
@@ -120,7 +139,7 @@ export function probeViaElement(file: File): Promise<AudioMeta> {
         lengthSamples: null,
         effectiveBitrateKbps: Math.round((file.size * 8) / duration / 1000),
         probeNote:
-          "Duration measured via media element (file too large for full decode). Sample rate and channel count not probed — reported as unknown rather than guessed.",
+          "Duration measured via media element without full PCM allocation. Sample rate and channel count not probed — reported as unknown rather than guessed.",
         metaSource: "element",
       });
     };
