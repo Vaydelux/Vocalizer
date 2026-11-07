@@ -631,12 +631,19 @@ const WavePlayerImpl: ForwardRefRenderFunction<WavePlayerHandle, Props> = (
       <div className="relative px-4 pt-4">
         <div ref={scrollRef} className="studio-scroll relative w-full overflow-x-auto overflow-y-hidden" style={{ height }} onScroll={draw}>
           <div className="relative" style={{ width: viewport.timelineWidth, height }}>
+            <div className="sticky left-0" style={{ width: viewport.viewportWidth, height }}>
+              <canvas
+                ref={canvasRef}
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-0 block"
+                style={{ height }}
+              />
           <canvas
-            ref={canvasRef}
+            ref={overlayCanvasRef}
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
-            className="sticky left-0 block touch-none cursor-pointer"
+            className="absolute inset-0 block touch-none cursor-pointer"
             role="slider"
             aria-label="Waveform — click to seek, drag to select a region"
             aria-valuemin={0}
@@ -658,6 +665,7 @@ const WavePlayerImpl: ForwardRefRenderFunction<WavePlayerHandle, Props> = (
             }}
             style={{ height }}
           />
+            </div>
           </div>
         </div>
         {!ready && !error && (
