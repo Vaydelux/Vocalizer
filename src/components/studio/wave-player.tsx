@@ -120,6 +120,7 @@ const WavePlayerImpl: ForwardRefRenderFunction<WavePlayerHandle, Props> = (
   const regionRef = useRef<RegionRange | null>(null);
   const loopRef = useRef(false);
   const rafRef = useRef<number>(0);
+  const scrollRafRef = useRef<number>(0);
   const dragRef = useRef<{ active: boolean; startX: number; moved: boolean } | null>(null);
 
   const [ready, setReady] = useState(false);
@@ -361,6 +362,17 @@ const WavePlayerImpl: ForwardRefRenderFunction<WavePlayerHandle, Props> = (
     drawWaveform();
     drawOverlay();
   }, [drawWaveform, drawOverlay]);
+
+  // Coalesce a burst of scroll events into one static viewport repaint/frame.
+  const onViewportScroll = useCallback(() => {
+    if (scrollRafRef.current) return;
+    scrollRafRef.current = requestAnimationFrame(() => {
+      scrollRafRef.current = 0;
+      draw();
+    });
+  }, [draw]);
+
+  useEffect(() => () => cancelAnimationFrame(scrollRafRef.current), []);
 
   // Reset static peaks after a track switch or a new cache computation,
   // and redraw both layers when the viewport, zoom or region changes.
@@ -629,7 +641,7 @@ const WavePlayerImpl: ForwardRefRenderFunction<WavePlayerHandle, Props> = (
   return (
     <div ref={playerRef} className={cn("rounded-xl border border-border bg-card", className)}>
       <div className="relative px-4 pt-4">
-        <div ref={scrollRef} className="studio-scroll relative w-full overflow-x-auto overflow-y-hidden" style={{ height }} onScroll={draw}>
+        <div ref={scrollRef} className="studio-scroll relative w-full overflow-x-auto overflow-y-hidden" style={{ height }} onScroll={onViewportScroll}>
           <div className="relative" style={{ width: viewport.timelineWidth, height }}>
             <div className="sticky left-0" style={{ width: viewport.viewportWidth, height }}>
               <canvas
