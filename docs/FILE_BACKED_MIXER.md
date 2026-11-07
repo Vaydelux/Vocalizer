@@ -135,9 +135,10 @@ For small browser-decodable audio, waveform envelopes are now extracted in
 **128-bucket batches** (40 buckets/s visual density), yielding to the event loop
 between batches rather than blocking for an entire channel. Each batch checks
 the active abort signal: switching sources or unmounting the player aborts
-pending peak analysis. Once an in-flight Web Audio decoder has started it
-cannot be forcibly interrupted by this change, but results from abandoned
-work are not published.
+pending peak analysis. The browser metadata preflight also releases its
+object URL and timeout immediately on cancellation, before any full file read.
+Once an in-flight Web Audio decoder has started it cannot be forcibly
+interrupted, but results from abandoned work are not published.
 
 Peak cache entries bind both the track ID and its current media URL, preventing
 relinked project audio from inheriting an old waveform when it retains its
