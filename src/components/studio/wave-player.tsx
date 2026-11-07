@@ -242,10 +242,14 @@ const WavePlayerImpl: ForwardRefRenderFunction<WavePlayerHandle, Props> = (
     const cssH = height;
     const requestedDpr = Math.min(window.devicePixelRatio || 1, 2);
     const rasterScale = Math.max(0.01, Math.min(requestedDpr, MAX_WAVEFORM_RASTER_PX / cssW));
-    canvas.width = Math.max(1, Math.ceil(cssW * rasterScale));
-    canvas.height = Math.max(1, Math.ceil(cssH * rasterScale));
-    canvas.style.width = `${cssW}px`;
-    canvas.style.height = `${cssH}px`;
+    // Assigning canvas.width/height resets the entire bitmap and graphics
+    // state. Avoid reallocating it for every 60 Hz playhead frame.
+    const rasterW = Math.max(1, Math.ceil(cssW * rasterScale));
+    const rasterH = Math.max(1, Math.ceil(cssH * rasterScale));
+    if (canvas.width !== rasterW) canvas.width = rasterW;
+    if (canvas.height !== rasterH) canvas.height = rasterH;
+    if (canvas.style.width !== `${cssW}px`) canvas.style.width = `${cssW}px`;
+    if (canvas.style.height !== `${cssH}px`) canvas.style.height = `${cssH}px`;
     ctx.setTransform(rasterScale, 0, 0, rasterScale, 0, 0);
     ctx.clearRect(0, 0, cssW, cssH);
     const pxPerSec = viewport.pixelsPerSecond;
