@@ -86,7 +86,6 @@ function clamp(v: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, v));
 }
 
-
 /** The two overlaid canvases share exact bitmaps and CSS dimensions. */
 function prepareCanvas(
   canvas: HTMLCanvasElement,
@@ -319,7 +318,6 @@ const WavePlayerImpl: ForwardRefRenderFunction<WavePlayerHandle, Props> = (
       // No peaks (e.g., file too large to decode): honest flat line.
       ctx.fillRect(0, mid, cssW, 1);
     }
-
   }, [viewport, height]);
 
   const drawOverlay = useCallback(() => {
@@ -650,33 +648,33 @@ const WavePlayerImpl: ForwardRefRenderFunction<WavePlayerHandle, Props> = (
                 className="pointer-events-none absolute inset-0 block"
                 style={{ height }}
               />
-          <canvas
-            ref={overlayCanvasRef}
-            onPointerDown={onPointerDown}
-            onPointerMove={onPointerMove}
-            onPointerUp={onPointerUp}
-            className="absolute inset-0 block touch-none cursor-pointer"
-            role="slider"
-            aria-label="Waveform — click to seek, drag to select a region"
-            aria-valuemin={0}
-            aria-valuemax={Math.round(duration)}
-            aria-valuenow={Math.round(currentTime)}
-            aria-valuetext={`${formatTime(currentTime)} of ${formatTime(duration)}`}
-            tabIndex={ready ? 0 : -1}
-            onKeyDown={(event) => {
-              if (!ready) return;
-              if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
-                event.preventDefault();
-                event.stopPropagation();
-                seek(currentTime + (event.key === "ArrowRight" ? 2 : -2));
-              } else if (event.key === "Home" || event.key === "End") {
-                event.preventDefault();
-                event.stopPropagation();
-                seek(event.key === "Home" ? 0 : duration);
-              }
-            }}
-            style={{ height }}
-          />
+              <canvas
+                ref={overlayCanvasRef}
+                onPointerDown={onPointerDown}
+                onPointerMove={onPointerMove}
+                onPointerUp={onPointerUp}
+                className="absolute inset-0 block touch-none cursor-pointer"
+                role="slider"
+                aria-label="Waveform — click to seek, drag to select a region"
+                aria-valuemin={0}
+                aria-valuemax={Math.round(duration)}
+                aria-valuenow={Math.round(currentTime)}
+                aria-valuetext={`${formatTime(currentTime)} of ${formatTime(duration)}`}
+                tabIndex={ready ? 0 : -1}
+                onKeyDown={(event) => {
+                  if (!ready) return;
+                  if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    seek(currentTime + (event.key === "ArrowRight" ? 2 : -2));
+                  } else if (event.key === "Home" || event.key === "End") {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    seek(event.key === "Home" ? 0 : duration);
+                  }
+                }}
+                style={{ height }}
+              />
             </div>
           </div>
         </div>
