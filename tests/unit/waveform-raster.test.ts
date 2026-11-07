@@ -12,6 +12,7 @@ describe("layered waveform raster allocation policy", () => {
     const wide = planWaveformRaster(20000, 128, 3);
     expect(wide.width).toBeLessThanOrEqual(MAX_WAVEFORM_RASTER_PX);
     expect(wide.height).toBeLessThanOrEqual(4096);
+    expect(planWaveformRaster(2_000_000, 128, 2).width).toBeLessThanOrEqual(MAX_WAVEFORM_RASTER_PX);
     const tall = planWaveformRaster(1000, 10000, 2);
     expect(tall.height).toBeLessThanOrEqual(4096);
   });
