@@ -169,6 +169,8 @@ bun scripts/benchmark-peaks.ts --output reports/peak-benchmark.json
 The 45-second elapsed and 96 MiB sampled process-RSS thresholds are generous
 CI regression guards, **not** production targets. Numbers from different CI
 runner generations should not be directly compared as performance baselines.
+The report includes the checked-out commit SHA so measurements can be traced
+back to their exact source and Windows runner artifacts.
 This test does not instantiate Web Audio, a real Electron waveform canvas, a
 compressed codec or the native worker. Actual renderer/GPU frame timing and
 physical Windows long-file testing remain mandatory release gates.
