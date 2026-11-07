@@ -372,11 +372,16 @@ const WavePlayerImpl: ForwardRefRenderFunction<WavePlayerHandle, Props> = (
 
   useEffect(() => () => cancelAnimationFrame(scrollRafRef.current), []);
 
-  // Reset static peaks after a track switch or a new cache computation,
-  // and redraw both layers when the viewport, zoom or region changes.
+  // Static peaks only change with source, cache, duration, zoom or viewport.
+  // Selection dragging should never force a second full-peaks traversal.
   useEffect(() => {
     draw();
-  }, [draw, ready, region, zoom, peakVersion]);
+  }, [draw, ready, peakVersion]);
+
+  // Region updates and pointer selection repaint only the cheap overlay.
+  useEffect(() => {
+    drawOverlay();
+  }, [region, drawOverlay]);
 
   // Only the lightweight overlay updates every frame during playback.
   useEffect(() => {
