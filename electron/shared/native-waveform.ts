@@ -23,6 +23,8 @@ export interface NativeWaveformResult {
   duration: number;
   sampleRate: number;
   levels: NativePeakLevel[];
+  /** Whether main reused a verified, integrity-checked local cache entry. */
+  cacheHit?: boolean;
 }
 
 export function aggregatePeakLevel(input: NativePeakLevel, targetFps: number): NativePeakLevel {
