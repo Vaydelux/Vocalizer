@@ -142,6 +142,7 @@ function createWindow(): void {
             nativeMicrophoneMixVerified: boolean;
             protectedStemProbeVerified: boolean;
             nativeStemRangeVerified: boolean; nativeStemSeekVerified: boolean;
+            nativeWaveformVerified: boolean;
           } = await mainWindow!.webContents.executeJavaScript(`(async () => {
             const bridge = window.studio;
             if (!bridge || bridge.isNative !== true) {
@@ -157,6 +158,19 @@ function createWindow(): void {
             const smokeMeta = await bridge.probeInferenceStem({
               jobId: "windows-smoke-media", stem: "Vocals",
             });
+            // Exercise the real FFmpeg streamed waveform worker through
+            // the same restricted IPC channel used by an opened AI stem.
+            const waveform = await bridge.generateInferenceWaveform({
+              jobId: "windows-smoke-media", stem: "Vocals",
+            });
+            const nativeWaveformVerified =
+              typeof bridge.generateInferenceWaveform === "function" &&
+              waveform.duration > 1.5 &&
+              waveform.levels.length === 3 &&
+              waveform.levels.map((x) => x.fps).join(",") === "40,10,2" &&
+              waveform.levels.every((x) =>
+                x.buckets > 0 && x.minMax.length === x.buckets * 2) &&
+              waveform.levels[0].minMax.some((value) => Math.abs(value) > 0.01);
             const mediaResponse = await fetch(mediaUrl, {
               headers: { Range: "bytes=100-199" },
               cache: "no-store",
@@ -234,6 +248,7 @@ function createWindow(): void {
               protectedStemProbeVerified,
               nativeStemRangeVerified,
               nativeStemSeekVerified,
+              nativeWaveformVerified,
               nativeMicrophoneMixVerified: staged.staged === true && mixed.verified === true &&
                 mixed.sizeBytes > 0 && mixMeta.duration > 1.5 &&
                 discarded.discarded === false
@@ -242,7 +257,7 @@ function createWindow(): void {
           if (!result.hasBridge || !result.hasRenderer || !result.hasFfmpeg || !result.hasWorker ||
               !result.nativeAudioVerified || !result.nativeMicrophoneMixVerified ||
               !result.protectedStemProbeVerified || !result.nativeStemRangeVerified ||
-              !result.nativeStemSeekVerified) {
+              !result.nativeStemSeekVerified || !result.nativeWaveformVerified) {
             throw new Error("Packaged renderer, preload, FFmpeg or worker unavailable: " + JSON.stringify(result));
           }
           console.log("SMOKE_PASS " + JSON.stringify(result));

@@ -46,6 +46,7 @@ import { Slider } from "@/components/ui/slider";
 import { useSettings } from "@/lib/studio/store-settings";
 import { cachePeaks, computePeaks, getCachedPeaks, type Peaks } from "@/lib/studio/peaks";
 import { decodeFile } from "@/lib/studio/decode";
+import { native, isNative } from "@/lib/studio/native";
 import { planWaveformViewport, waveformTimeAtPointer } from "@/lib/studio/waveform-viewport";
 import { planWaveformRaster } from "@/lib/studio/waveform-raster";
 import { mayComputeFullWaveform, shouldPreloadMetadataOnly } from "@/lib/studio/waveform-policy";
@@ -155,6 +156,7 @@ const WavePlayerImpl: ForwardRefRenderFunction<WavePlayerHandle, Props> = (
     let cancelled = false;
     // A discarded player must stop incremental peak work, not just ignore it.
     const peakAbort = new AbortController();
+    let nativePeakStarted = false;
     const audio = new Audio();
     audio.crossOrigin = "anonymous";
     audio.preload = shouldPreloadMetadataOnly(track) ? "metadata" : "auto";
@@ -218,8 +220,35 @@ const WavePlayerImpl: ForwardRefRenderFunction<WavePlayerHandle, Props> = (
           }
           return;
         }
-        // The browser PCM policy already bounds compressed size and measured
-        // duration. Large and disk-backed files remain media-element-only.
+        // Native published stems use main-owned FFmpeg decoding. Only bounded
+        // float32 min/max envelopes cross IPC, never full decoded PCM.
+        if (track.nativeStem && isNative()) {
+          const api = native();
+          if (!api) return;
+          nativePeakStarted = true;
+          const result = await api.generateInferenceWaveform(track.nativeStem);
+          if (cancelled || peakAbort.signal.aborted) return;
+          const ordered = [...result.levels].sort((a, b) => b.fps - a.fps);
+          if (ordered.length !== 3 || ordered.some(level =>
+            !Number.isFinite(level.fps) || level.fps <= 0 ||
+            !Number.isSafeInteger(level.buckets) || level.buckets < 1 ||
+            level.minMax.length !== level.buckets * 2
+          )) throw new Error("The native waveform response is invalid.");
+          const toPeaks = (level: typeof ordered[number]): Peaks => ({
+            channels: [new Float32Array(level.minMax)],
+            buckets: level.buckets,
+            fps: level.fps,
+            duration: result.duration,
+            sampleRate: result.sampleRate,
+          });
+          const peaks = toPeaks(ordered[0]);
+          peaks.overviewLevels = ordered.slice(1).map(toPeaks);
+          peaksRef.current = peaks;
+          cachePeaks(track.id, peaks, track.url);
+          setPeakVersion(v => v + 1);
+          return;
+        }
+        // Normal browser preview continues using the conservative PCM budget.
         if (!mayComputeFullWaveform(track)) return;
         const { buffer } = await decodeFile(track.file, peakAbort.signal);
         if (cancelled || peakAbort.signal.aborted) return;
@@ -241,6 +270,9 @@ const WavePlayerImpl: ForwardRefRenderFunction<WavePlayerHandle, Props> = (
     return () => {
       cancelled = true;
       peakAbort.abort();
+      if (nativePeakStarted && track.nativeStem) {
+        void native()?.cancelInferenceWaveform(track.nativeStem).catch(() => { /* closed */ });
+      }
       cancelAnimationFrame(rafRef.current);
       audio.removeEventListener("loadstart", onLoadStart);
       audio.removeEventListener("loadedmetadata", onLoaded);
@@ -268,8 +300,13 @@ const WavePlayerImpl: ForwardRefRenderFunction<WavePlayerHandle, Props> = (
     const cssH = height;
     const ctx = prepareCanvas(canvas, cssW, cssH);
     if (!ctx) return;
-    const peaks = peaksRef.current;
+    const stored = peaksRef.current;
     const pxPerSec = viewport.pixelsPerSecond;
+    const peaks = stored?.overviewLevels
+      ? [...stored.overviewLevels, stored]
+        .sort((a, b) => a.fps - b.fps)
+        .find(level => level.fps >= pxPerSec) ?? stored
+      : stored;
     const scrollX = scrollRef.current?.scrollLeft ?? 0;
     // Mid line
     ctx.fillStyle = WAVE_COLOR;

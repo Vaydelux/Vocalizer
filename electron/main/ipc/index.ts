@@ -28,6 +28,7 @@ import {
   type NativeSettings,
 } from "../../shared/ipc";
 import { probeFile } from "../services/ffprobe";
+import { generateNativeStemWaveform } from "../services/native-waveform";
 import { parseNativeStemInput } from "../../shared/stem-input";
 import { parsePublishedStemFilename, doesRelinkedStemMatch } from "../../shared/published-stem";
 import { runFfmpeg, cancelJob, toMainErrorPayload } from "../services/ffmpeg";
@@ -468,6 +469,46 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
     assertSender(event);
     const req = cancelRequestSchema.parse(raw ?? {});
     return { cancelled: cancelSeparation(req.jobId) };
+  });
+
+  // Only one decoder is allowed per main process to constrain background CPU
+  // usage; starting a new track aborts an older waveform request.
+  let activeWaveform: {
+    key: string; controller: AbortController;
+  } | null = null;
+
+  ipcMain.handle(IPC.INFERENCE_STEM_WAVEFORM, async (event, raw) => {
+    assertSender(event);
+    const req = revealInferenceStemSchema.parse(raw);
+    const approved = await resolveCompletedStemForPlayback(req.jobId, req.stem);
+    if (!approved) throw studioError("MISSING_FILE", "Verified audio stem is unavailable for waveform generation.");
+    const key = `${req.jobId}:${req.stem}`;
+    activeWaveform?.controller.abort();
+    const task = { key, controller: new AbortController() };
+    activeWaveform = task;
+    try {
+      const meta = await probeFile(approved, task.controller.signal);
+      if (task.controller.signal.aborted) throw studioError("CANCELLED");
+      if (!Number.isFinite(meta.duration) || meta.duration <= 0 || meta.duration > 4 * 3600) {
+        throw studioError("INPUT_INVALID", "Waveform duration must be under four hours.");
+      }
+      const response = await generateNativeStemWaveform(approved, meta.duration, task.controller.signal);
+      if (task.controller.signal.aborted ||
+          await resolveCompletedStemForPlayback(req.jobId, req.stem) !== approved) {
+        throw studioError("CANCELLED", "This source changed while generating waveform peaks.");
+      }
+      return response;
+    } finally {
+      if (activeWaveform === task) activeWaveform = null;
+    }
+  });
+
+  ipcMain.handle(IPC.INFERENCE_CANCEL_STEM_WAVEFORM, async (event, raw) => {
+    assertSender(event);
+    const req = revealInferenceStemSchema.parse(raw);
+    if (activeWaveform?.key !== `${req.jobId}:${req.stem}`) return { cancelled: false };
+    activeWaveform.controller.abort();
+    return { cancelled: true };
   });
 
   ipcMain.handle(IPC.INFERENCE_PROBE_STEM, async (event, raw) => {
