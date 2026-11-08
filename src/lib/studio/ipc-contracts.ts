@@ -199,8 +199,8 @@ export interface StudioNativeApi {
   cancelInference(req: { jobId: string }): Promise<{ cancelled: boolean }>;
   revealInferenceStem(req: { jobId: string; stem: InferenceStemResult["stem"] }): Promise<{ revealed: boolean }>;
   probeInferenceStem(req: { jobId: string; stem: InferenceStemResult["stem"] }): Promise<NativeAudioMeta>;
-  generateInferenceWaveform(req: { jobId: string; stem: InferenceStemResult["stem"] }): Promise<NativeWaveformResult>;
-  cancelInferenceWaveform(req: { jobId: string; stem: InferenceStemResult["stem"] }): Promise<{ cancelled: boolean }>;
+  generateInferenceWaveform(req: { jobId: string; stem: InferenceStemResult["stem"]; requestId: string }): Promise<NativeWaveformResult>;
+  cancelInferenceWaveform(req: { jobId: string; stem: InferenceStemResult["stem"]; requestId: string }): Promise<{ cancelled: boolean }>;
   relinkInferenceStems(req: NativeStemRelinkRequest): Promise<NativeStemRelinkResponse>;
   onInferenceProgress(cb: (p: InferenceProgress) => void): () => void;
   getSettings(): Promise<NativeSettings>;
