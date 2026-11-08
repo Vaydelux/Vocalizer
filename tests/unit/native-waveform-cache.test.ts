@@ -137,10 +137,17 @@ describe("persistent native waveform cache", () => {
       ".peak." + "a".repeat(16) + ".tmp";
     const stale = path.join(root, name);
     await fs.writeFile(stale, Buffer.from("abandoned"));
+    const freshName = "." + nativeWaveformFingerprint(src).toString("hex") +
+      ".peak." + "b".repeat(16) + ".tmp";
+    await fs.writeFile(path.join(root, freshName), Buffer.from("active-write"));
+    await fs.writeFile(path.join(root, "unrelated.txt"), Buffer.from("do-not-touch"));
     const expired = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
     await fs.utimes(stale, expired, expired);
     await writeNativeWaveformCache(root, src, fixture());
-    expect((await fs.readdir(root)).includes(name)).toBe(false);
+    const entries = await fs.readdir(root);
+    expect(entries.includes(name)).toBe(false);
+    expect(entries.includes(freshName)).toBe(true);
+    expect(entries.includes("unrelated.txt")).toBe(true);
     expect((await readNativeWaveformCache(root, src))?.levels.length).toBe(3);
   });
 
