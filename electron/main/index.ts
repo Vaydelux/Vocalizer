@@ -162,15 +162,23 @@ function createWindow(): void {
             // the same restricted IPC channel used by an opened AI stem.
             const waveform = await bridge.generateInferenceWaveform({
               jobId: "windows-smoke-media", stem: "Vocals",
+              requestId: "3f8d97b5-eae8-4fa2-aa5f-0b483fc09821",
             });
             // A second request must exercise integrity-checked disk cache,
             // not run another full FFmpeg scan of the same verified WAV.
             const repeatedWaveform = await bridge.generateInferenceWaveform({
               jobId: "windows-smoke-media", stem: "Vocals",
+              requestId: "df4b1dba-38c6-4e65-840d-f28db9a9251a",
+            });
+            // A stale cancellation is never permitted to cancel a newer task.
+            const staleCancel = await bridge.cancelInferenceWaveform({
+              jobId: "windows-smoke-media", stem: "Vocals",
+              requestId: "3f8d97b5-eae8-4fa2-aa5f-0b483fc09821",
             });
             const nativeWaveformVerified =
               typeof bridge.generateInferenceWaveform === "function" &&
               repeatedWaveform.cacheHit === true &&
+              staleCancel.cancelled === false &&
               repeatedWaveform.levels.length === 3 &&
               repeatedWaveform.levels[0].buckets === waveform.levels[0].buckets &&
               repeatedWaveform.levels[0].minMax.some((value) => Math.abs(value) > 0.01) &&
