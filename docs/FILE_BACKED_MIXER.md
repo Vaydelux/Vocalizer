@@ -201,3 +201,30 @@ mastering analysis. Peaks persist only in the renderer LRU for the current
 session. Persistent integrity-checked disk caching and arbitrary giant
 user-imported file waveforms are future milestones. Physical long-session
 Windows rendering/codec QA remains a separate release gate.
+
+## Persistent native waveform cache — experimental
+
+Verified native stem peaks are now eligible for reuse across application
+restarts. Main derives a SHA-256 cache key from the **canonical, already
+authorized stem path** and filesystem identity (device, inode, size, mtime
+and ctime). Project JSON and renderer IPC may not choose a source path,
+cache path or filename.
+
+- The private cache lives under `userData/cache/native-waveforms-v1`;
+  it stores 40/10/2-Hz Float32 peak envelopes, not raw audio or paths.
+- A versioned binary header and SHA-256 checksum cover both metadata and
+  samples. Truncated, corrupted, stale and replaced cache entries become
+  misses; FFmpeg regenerates the waveform.
+- A read checks file-handle identity and rejects symbolic links; reads are
+  size-bounded. Exclusive temporary writes and atomic rename publish entries.
+  A best-effort 128 MiB disk quota removes old entries.
+- Main checks the verified source again after FFmpeg finishes to reject a
+  file changed mid-analysis. Cache write failures cannot break audio playback.
+- The packaged Windows smoke requests the same waveform twice and verifies
+  that the second request is a genuine cache hit.
+
+**Limitations:** Cache checksums detect corruption but are not signatures
+against an attacker who controls user application data. Filesystem metadata
+is a practical change detector, not a cryptographic content hash of a
+multi-GB recording. Only main-registered completed/relinked stems qualify.
+Physical long-session Windows usage remains a public-release acceptance gate.
