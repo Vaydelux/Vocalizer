@@ -494,13 +494,18 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
       if (task.controller.signal.aborted) throw studioError("CANCELLED", "Superseded waveform request.");
       if (!approved) throw studioError("MISSING_FILE", "Verified audio stem is unavailable for waveform generation.");
       const source = await identifyNativeWaveformSource(approved);
+      if (task.controller.signal.aborted) throw studioError("CANCELLED");
       const storage = path.join(cacheDir(), "native-waveforms-v1");
       const cached = await readNativeWaveformCache(storage, source);
       if (task.controller.signal.aborted) throw studioError("CANCELLED");
       if (cached) {
         const current = await identifyNativeWaveformSource(approved);
+        const registered = await resolveCompletedStemForPlayback(req.jobId, req.stem);
+        // A cached result can only be returned by its still-active owner,
+        // even when cancellation occurs during the last filesystem awaits.
+        if (task.controller.signal.aborted) throw studioError("CANCELLED");
         if (nativeWaveformFingerprint(current).equals(nativeWaveformFingerprint(source)) &&
-            await resolveCompletedStemForPlayback(req.jobId, req.stem) === approved) {
+            registered === approved) {
           return { ...cached, cacheHit: true };
         }
         throw studioError("CANCELLED", "Native audio changed while reading cached peaks.");
@@ -516,6 +521,7 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
         throw studioError("CANCELLED", "This source changed while generating waveform peaks.");
       }
       const after = await identifyNativeWaveformSource(approved);
+      if (task.controller.signal.aborted) throw studioError("CANCELLED");
       if (!nativeWaveformFingerprint(source).equals(nativeWaveformFingerprint(after))) {
         throw studioError("CANCELLED", "Native audio was modified during waveform generation.");
       }
@@ -524,6 +530,7 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
       try {
         await writeNativeWaveformCache(storage, source, response);
       } catch { /* regeneration remains available on next project open */ }
+      if (task.controller.signal.aborted) throw studioError("CANCELLED");
       return { ...response, cacheHit: false };
     } finally {
       if (activeWaveform === task) activeWaveform = null;
