@@ -30,7 +30,7 @@ import {
 } from "../../shared/ipc";
 import { probeFile } from "../services/ffprobe";
 import { generateNativeStemWaveform } from "../services/native-waveform";
-import { sameWaveformRequest } from "../../shared/waveform-request";
+import { WaveformRequestCoordinator } from "../../shared/waveform-request";
 import { identifyNativeWaveformSource, nativeWaveformFingerprint, readNativeWaveformCache, writeNativeWaveformCache } from "../services/waveform-cache";
 import { parseNativeStemInput } from "../../shared/stem-input";
 import { parsePublishedStemFilename, doesRelinkedStemMatch } from "../../shared/published-stem";
@@ -476,19 +476,13 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
 
   // Only one decoder is allowed per main process to constrain background CPU
   // usage; starting a new track aborts an older waveform request.
-  let activeWaveform: {
-    request: { jobId: string; stem: string; requestId: string };
-    controller: AbortController;
-  } | null = null;
+  const waveformRequests = new WaveformRequestCoordinator();
   ipcMain.handle(IPC.INFERENCE_STEM_WAVEFORM, async (event, raw) => {
     assertSender(event);
     const req = inferenceWaveformRequestSchema.parse(raw);
-    // Register BEFORE any async source validation so closing a player also
-    // cancels requests still waiting for a slow registry/filesystem lookup.
-    // A later request supersedes the old one in arrival order.
-    activeWaveform?.controller.abort();
-    const task = { request: req, controller: new AbortController() };
-    activeWaveform = task;
+    // Register BEFORE async authorization so slow source lookups and
+    // outdated player cleanups cannot interfere with newer requests.
+    const task = waveformRequests.start(req);
     try {
       const approved = await resolveCompletedStemForPlayback(req.jobId, req.stem);
       if (task.controller.signal.aborted) throw studioError("CANCELLED", "Superseded waveform request.");
@@ -533,18 +527,14 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
       if (task.controller.signal.aborted) throw studioError("CANCELLED");
       return { ...response, cacheHit: false };
     } finally {
-      if (activeWaveform === task) activeWaveform = null;
+      waveformRequests.finish(task);
     }
   });
 
   ipcMain.handle(IPC.INFERENCE_CANCEL_STEM_WAVEFORM, async (event, raw) => {
     assertSender(event);
     const req = inferenceWaveformRequestSchema.parse(raw);
-    if (!sameWaveformRequest(activeWaveform?.request ?? null, req)) {
-      return { cancelled: false };
-    }
-    activeWaveform?.controller.abort();
-    return { cancelled: true };
+    return { cancelled: waveformRequests.cancel(req) };
   });
 
   ipcMain.handle(IPC.INFERENCE_PROBE_STEM, async (event, raw) => {
