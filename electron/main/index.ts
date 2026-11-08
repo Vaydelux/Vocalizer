@@ -163,8 +163,17 @@ function createWindow(): void {
             const waveform = await bridge.generateInferenceWaveform({
               jobId: "windows-smoke-media", stem: "Vocals",
             });
+            // A second request must exercise integrity-checked disk cache,
+            // not run another full FFmpeg scan of the same verified WAV.
+            const repeatedWaveform = await bridge.generateInferenceWaveform({
+              jobId: "windows-smoke-media", stem: "Vocals",
+            });
             const nativeWaveformVerified =
               typeof bridge.generateInferenceWaveform === "function" &&
+              repeatedWaveform.cacheHit === true &&
+              repeatedWaveform.levels.length === 3 &&
+              repeatedWaveform.levels[0].buckets === waveform.levels[0].buckets &&
+              repeatedWaveform.levels[0].minMax.some((value) => Math.abs(value) > 0.01) &&
               waveform.duration > 1.5 &&
               waveform.levels.length === 3 &&
               waveform.levels.map((x) => x.fps).join(",") === "40,10,2" &&

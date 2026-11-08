@@ -29,13 +29,14 @@ import {
 } from "../../shared/ipc";
 import { probeFile } from "../services/ffprobe";
 import { generateNativeStemWaveform } from "../services/native-waveform";
+import { identifyNativeWaveformSource, nativeWaveformFingerprint, readNativeWaveformCache, writeNativeWaveformCache } from "../services/waveform-cache";
 import { parseNativeStemInput } from "../../shared/stem-input";
 import { parsePublishedStemFilename, doesRelinkedStemMatch } from "../../shared/published-stem";
 import { runFfmpeg, cancelJob, toMainErrorPayload } from "../services/ffmpeg";
 import { getSettings, setSettings } from "../services/settings";
 import { stageRecordingBytes, discardRecordingFile } from "../services/recording-staging";
 import { inferenceScratchBase, publishInferenceStems } from "../services/inference-outputs";
-import { getFfmpegPath, getFfprobePath, resolvePathKind } from "../services/paths";
+import { getFfmpegPath, getFfprobePath, resolvePathKind, cacheDir } from "../services/paths";
 import { studioError } from "../services/errors";
 import {
   isWorkerAvailable,
@@ -487,6 +488,18 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
     const task = { key, controller: new AbortController() };
     activeWaveform = task;
     try {
+      const source = await identifyNativeWaveformSource(approved);
+      const storage = path.join(cacheDir(), "native-waveforms-v1");
+      const cached = await readNativeWaveformCache(storage, source);
+      if (task.controller.signal.aborted) throw studioError("CANCELLED");
+      if (cached) {
+        const current = await identifyNativeWaveformSource(approved);
+        if (nativeWaveformFingerprint(current).equals(nativeWaveformFingerprint(source)) &&
+            await resolveCompletedStemForPlayback(req.jobId, req.stem) === approved) {
+          return { ...cached, cacheHit: true };
+        }
+        throw studioError("CANCELLED", "Native audio changed while reading cached peaks.");
+      }
       const meta = await probeFile(approved, task.controller.signal);
       if (task.controller.signal.aborted) throw studioError("CANCELLED");
       if (!Number.isFinite(meta.duration) || meta.duration <= 0 || meta.duration > 4 * 3600) {
@@ -497,7 +510,16 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
           await resolveCompletedStemForPlayback(req.jobId, req.stem) !== approved) {
         throw studioError("CANCELLED", "This source changed while generating waveform peaks.");
       }
-      return response;
+      const after = await identifyNativeWaveformSource(approved);
+      if (!nativeWaveformFingerprint(source).equals(nativeWaveformFingerprint(after))) {
+        throw studioError("CANCELLED", "Native audio was modified during waveform generation.");
+      }
+      // Cache failures are best-effort: successful waveform generation must
+      // never fail merely because the disk is full or cache is read-only.
+      try {
+        await writeNativeWaveformCache(storage, source, response);
+      } catch { /* regeneration remains available on next project open */ }
+      return { ...response, cacheHit: false };
     } finally {
       if (activeWaveform === task) activeWaveform = null;
     }

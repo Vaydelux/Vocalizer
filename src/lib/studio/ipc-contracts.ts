@@ -164,6 +164,7 @@ export interface NativeWaveformResult {
   duration: number;
   sampleRate: number;
   levels: NativeWaveformLevel[];
+  cacheHit?: boolean;
 }
 
 export interface StudioNativeApi {
