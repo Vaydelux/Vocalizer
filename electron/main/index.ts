@@ -166,15 +166,17 @@ function createWindow(): void {
             });
             // A second request must exercise integrity-checked disk cache,
             // not run another full FFmpeg scan of the same verified WAV.
-            const repeatedWaveform = await bridge.generateInferenceWaveform({
+            const repeatedWaveformPending = bridge.generateInferenceWaveform({
               jobId: "windows-smoke-media", stem: "Vocals",
               requestId: "df4b1dba-38c6-4e65-840d-f28db9a9251a",
             });
-            // A stale cancellation is never permitted to cancel a newer task.
+            // Send the old player's cleanup while the new IPC request may
+            // still be pending. Only the old request ID is eligible to cancel.
             const staleCancel = await bridge.cancelInferenceWaveform({
               jobId: "windows-smoke-media", stem: "Vocals",
               requestId: "3f8d97b5-eae8-4fa2-aa5f-0b483fc09821",
             });
+            const repeatedWaveform = await repeatedWaveformPending;
             const nativeWaveformVerified =
               typeof bridge.generateInferenceWaveform === "function" &&
               repeatedWaveform.cacheHit === true &&
