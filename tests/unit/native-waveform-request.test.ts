@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { inferenceWaveformRequestSchema } from "../../electron/shared/ipc";
 import {
   sameWaveformRequest,
+  WaveformRequestCoordinator,
   type WaveformRequestIdentity,
 } from "../../electron/shared/waveform-request";
 
@@ -35,6 +36,48 @@ describe("native waveform per-invocation cancellation", () => {
     const oldCleanupWouldCancelNewRequest = sameWaveformRequest(active, first);
     expect(oldCleanupWouldCancelNewRequest).toBe(false);
     expect(sameWaveformRequest(active, reopened)).toBe(true);
+  });
+
+  it("cancels a request while its async source lookup is still pending", () => {
+    const coordinator = new WaveformRequestCoordinator();
+    const pendingLookup = coordinator.start(first);
+    expect(pendingLookup.controller.signal.aborted).toBe(false);
+    expect(coordinator.cancel(first)).toBe(true);
+    expect(pendingLookup.controller.signal.aborted).toBe(true);
+    coordinator.finish(pendingLookup);
+    expect(coordinator.cancel(first)).toBe(false);
+  });
+
+  it("keeps a replacement active when old cleanup and finally arrive late", () => {
+    const coordinator = new WaveformRequestCoordinator();
+    const original = coordinator.start(first);
+    const replacement = coordinator.start(reopened);
+    expect(original.controller.signal.aborted).toBe(true);
+    expect(replacement.controller.signal.aborted).toBe(false);
+
+    expect(coordinator.cancel(first)).toBe(false);
+    coordinator.finish(original); // old in-flight finally
+    expect(coordinator.cancel(first)).toBe(false);
+    expect(replacement.controller.signal.aborted).toBe(false);
+
+    // Only the owner that has the new ID can cancel the newer scan.
+    expect(coordinator.cancel(reopened)).toBe(true);
+    expect(replacement.controller.signal.aborted).toBe(true);
+    coordinator.finish(replacement);
+    expect(coordinator.cancel(reopened)).toBe(false);
+  });
+
+  it("superseding a different stem also aborts the previous decoder", () => {
+    const coordinator = new WaveformRequestCoordinator();
+    const original = coordinator.start(first);
+    const instrumental = {
+      ...reopened, stem: "Instrumental",
+    };
+    const second = coordinator.start(instrumental);
+    expect(original.controller.signal.aborted).toBe(true);
+    expect(coordinator.cancel(first)).toBe(false);
+    expect(second.controller.signal.aborted).toBe(false);
+    expect(coordinator.cancel(instrumental)).toBe(true);
   });
 
   it("rejects legacy cancellation without request identity or malformed UUIDs", () => {
