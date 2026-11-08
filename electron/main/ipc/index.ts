@@ -20,6 +20,7 @@ import {
   cancelRequestSchema,
   recordingStageSchema,
   revealInferenceStemSchema,
+  inferenceWaveformRequestSchema,
   nativeStemRelinkRequestSchema,
   resolvePathRequestSchema,
   nativeSettingsSchema,
@@ -29,6 +30,7 @@ import {
 } from "../../shared/ipc";
 import { probeFile } from "../services/ffprobe";
 import { generateNativeStemWaveform } from "../services/native-waveform";
+import { isCurrentWaveformInvocation, sameWaveformRequest } from "../../shared/waveform-request";
 import { identifyNativeWaveformSource, nativeWaveformFingerprint, readNativeWaveformCache, writeNativeWaveformCache } from "../services/waveform-cache";
 import { parseNativeStemInput } from "../../shared/stem-input";
 import { parsePublishedStemFilename, doesRelinkedStemMatch } from "../../shared/published-stem";
@@ -475,17 +477,24 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
   // Only one decoder is allowed per main process to constrain background CPU
   // usage; starting a new track aborts an older waveform request.
   let activeWaveform: {
-    key: string; controller: AbortController;
+    request: { jobId: string; stem: string; requestId: string };
+    controller: AbortController;
   } | null = null;
+  let waveformInvocation = 0;
 
   ipcMain.handle(IPC.INFERENCE_STEM_WAVEFORM, async (event, raw) => {
     assertSender(event);
-    const req = revealInferenceStemSchema.parse(raw);
+    const req = inferenceWaveformRequestSchema.parse(raw);
+    // Record arrival order BEFORE asynchronous registry authorization; an old
+    // slow lookup must not supersede a newer request for the same stem.
+    const invocation = ++waveformInvocation;
     const approved = await resolveCompletedStemForPlayback(req.jobId, req.stem);
+    if (!isCurrentWaveformInvocation(waveformInvocation, invocation)) {
+      throw studioError("CANCELLED", "Superseded waveform request.");
+    }
     if (!approved) throw studioError("MISSING_FILE", "Verified audio stem is unavailable for waveform generation.");
-    const key = `${req.jobId}:${req.stem}`;
     activeWaveform?.controller.abort();
-    const task = { key, controller: new AbortController() };
+    const task = { request: req, controller: new AbortController() };
     activeWaveform = task;
     try {
       const source = await identifyNativeWaveformSource(approved);
@@ -527,9 +536,11 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
 
   ipcMain.handle(IPC.INFERENCE_CANCEL_STEM_WAVEFORM, async (event, raw) => {
     assertSender(event);
-    const req = revealInferenceStemSchema.parse(raw);
-    if (activeWaveform?.key !== `${req.jobId}:${req.stem}`) return { cancelled: false };
-    activeWaveform.controller.abort();
+    const req = inferenceWaveformRequestSchema.parse(raw);
+    if (!sameWaveformRequest(activeWaveform?.request ?? null, req)) {
+      return { cancelled: false };
+    }
+    activeWaveform?.controller.abort();
     return { cancelled: true };
   });
 
