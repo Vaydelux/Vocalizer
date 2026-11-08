@@ -9,6 +9,7 @@ import {
   decodeNativeWaveformCache,
   readNativeWaveformCache,
   writeNativeWaveformCache,
+  planNativeWaveformEvictions,
 } from "../../electron/main/services/waveform-cache";
 import type { NativeWaveformResult } from "../../electron/shared/native-waveform";
 
@@ -96,6 +97,59 @@ describe("persistent native waveform cache", () => {
     const forgedMetadata = encodeNativeWaveformCache(src, fixture());
     forgedMetadata.writeDoubleLE(0.06, 16);
     expect(() => decodeNativeWaveformCache(src, forgedMetadata)).toThrow();
+  });
+
+  it("evicts every excess entry even when readdir order is not chronological", () => {
+    // 2,050 entries exceed the production max of 2,000. Entry 0 is newest;
+    // the old slice(0, MAX_CACHE_FILES) algorithm missed excess entries.
+    const entries = Array.from({ length: 2050 }, (_, i) => ({
+      name: i.toString().padStart(4, "0") + ".peak",
+      bytes: 128,
+      touchedMs: 2050 - i,
+    })).reverse();
+    const evictions = planNativeWaveformEvictions(entries);
+    expect(evictions).toHaveLength(50);
+    expect(evictions).toContain("2049.peak");
+    expect(evictions).not.toContain("0000.peak");
+  });
+
+  it("honors byte quota, file quota and invalid cache-file sizes", () => {
+    const files = [
+      { name: "newest.peak", bytes: 128, touchedMs: 4 },
+      { name: "second.peak", bytes: 128, touchedMs: 3 },
+      { name: "oversized.peak", bytes: 9 * 1024 * 1024, touchedMs: 100 },
+      { name: "older.peak", bytes: 128, touchedMs: 1 },
+      { name: "invalid.peak", bytes: 0, touchedMs: 5 },
+    ];
+    expect(planNativeWaveformEvictions(files, 256, 4).sort()).toEqual([
+      "invalid.peak", "older.peak", "oversized.peak",
+    ]);
+    expect(planNativeWaveformEvictions(files, 1024, 1).sort()).toEqual([
+      "invalid.peak", "older.peak", "oversized.peak", "second.peak",
+    ]);
+  });
+
+  it("cleans up an interrupted exclusive temporary write after one day", async () => {
+    const root = path.join(dir, "cache-stale-temps");
+    const src = await identifyNativeWaveformSource(await fs.realpath(sourceFile));
+    await writeNativeWaveformCache(root, src, fixture());
+    const name = "." + nativeWaveformFingerprint(src).toString("hex") +
+      ".peak." + "a".repeat(16) + ".tmp";
+    const stale = path.join(root, name);
+    await fs.writeFile(stale, Buffer.from("abandoned"));
+    const expired = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
+    await fs.utimes(stale, expired, expired);
+    await writeNativeWaveformCache(root, src, fixture());
+    expect((await fs.readdir(root)).includes(name)).toBe(false);
+    expect((await readNativeWaveformCache(root, src))?.levels.length).toBe(3);
+  });
+
+  it("fails cleanly when the cache location is unusable", async () => {
+    const root = path.join(dir, "cache-is-file");
+    await fs.writeFile(root, Buffer.from("not-a-directory"));
+    const src = await identifyNativeWaveformSource(await fs.realpath(sourceFile));
+    await expect(writeNativeWaveformCache(root, src, fixture())).rejects.toThrow();
+    expect(await readNativeWaveformCache(root, src)).toBeNull();
   });
 
   it("rejects symlinked cache entries instead of following them", async () => {
