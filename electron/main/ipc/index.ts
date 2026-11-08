@@ -30,7 +30,7 @@ import {
 } from "../../shared/ipc";
 import { probeFile } from "../services/ffprobe";
 import { generateNativeStemWaveform } from "../services/native-waveform";
-import { isCurrentWaveformInvocation, sameWaveformRequest } from "../../shared/waveform-request";
+import { sameWaveformRequest } from "../../shared/waveform-request";
 import { identifyNativeWaveformSource, nativeWaveformFingerprint, readNativeWaveformCache, writeNativeWaveformCache } from "../services/waveform-cache";
 import { parseNativeStemInput } from "../../shared/stem-input";
 import { parsePublishedStemFilename, doesRelinkedStemMatch } from "../../shared/published-stem";
@@ -480,23 +480,19 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
     request: { jobId: string; stem: string; requestId: string };
     controller: AbortController;
   } | null = null;
-  let waveformInvocation = 0;
-
   ipcMain.handle(IPC.INFERENCE_STEM_WAVEFORM, async (event, raw) => {
     assertSender(event);
     const req = inferenceWaveformRequestSchema.parse(raw);
-    // Record arrival order BEFORE asynchronous registry authorization; an old
-    // slow lookup must not supersede a newer request for the same stem.
-    const invocation = ++waveformInvocation;
-    const approved = await resolveCompletedStemForPlayback(req.jobId, req.stem);
-    if (!isCurrentWaveformInvocation(waveformInvocation, invocation)) {
-      throw studioError("CANCELLED", "Superseded waveform request.");
-    }
-    if (!approved) throw studioError("MISSING_FILE", "Verified audio stem is unavailable for waveform generation.");
+    // Register BEFORE any async source validation so closing a player also
+    // cancels requests still waiting for a slow registry/filesystem lookup.
+    // A later request supersedes the old one in arrival order.
     activeWaveform?.controller.abort();
     const task = { request: req, controller: new AbortController() };
     activeWaveform = task;
     try {
+      const approved = await resolveCompletedStemForPlayback(req.jobId, req.stem);
+      if (task.controller.signal.aborted) throw studioError("CANCELLED", "Superseded waveform request.");
+      if (!approved) throw studioError("MISSING_FILE", "Verified audio stem is unavailable for waveform generation.");
       const source = await identifyNativeWaveformSource(approved);
       const storage = path.join(cacheDir(), "native-waveforms-v1");
       const cached = await readNativeWaveformCache(storage, source);
