@@ -228,3 +228,19 @@ against an attacker who controls user application data. Filesystem metadata
 is a practical change detector, not a cryptographic content hash of a
 multi-GB recording. Only main-registered completed/relinked stems qualify.
 Physical long-session Windows usage remains a public-release acceptance gate.
+
+
+## Crash recovery and cache-quota enforcement
+
+Disk maintenance now considers **all** app-owned `.peak` entries rather than
+the first 2,000 filenames returned by the operating system. It retains the
+newest entries subject to the 2,000-entry and 128 MiB limits, evicting older
+or oversized entries. Directory scans use at most 32 concurrent metadata
+operations to avoid flooding a busy disk.
+
+Atomic temporary files matching the app-generated cache naming convention
+are removed only when older than 24 hours; newer in-progress writes are left
+alone. The cache remains entirely optional: an invalid, unavailable, full or
+read-only cache directory must not affect the native audio player's ability
+to stream or process verified stems. Automated tests exercise large-directory
+quota planning, stale temporary file recovery and invalid cache destinations.

@@ -15,8 +15,44 @@ const HEADER_BYTES = 128;
 const MAX_ENTRY_BYTES = 8 * 1024 * 1024;
 const MAX_DISK_BYTES = 128 * 1024 * 1024;
 const MAX_CACHE_FILES = 2000;
+const CACHE_TEMP_TTL_MS = 24 * 60 * 60 * 1000;
 const LEVEL_FPS = [40, 10, 2];
 const CACHE_FILENAME = /^[0-9a-f]{64}\.peak$/;
+const CACHE_TEMP_FILENAME = /^\.[0-9a-f]{64}\.peak\.[0-9a-f]{16}\.tmp$/;
+
+export interface NativeCacheCandidate {
+  name: string;
+  bytes: number;
+  touchedMs: number;
+}
+
+/**
+ * Deterministically select least-recently-used entries for eviction. Examine
+ * every owned cache entry; arbitrarily slicing directory results could leave
+ * older data untouched and make the nominal disk quota unenforceable.
+ */
+export function planNativeWaveformEvictions(
+  candidates: readonly NativeCacheCandidate[],
+  maxBytes = MAX_DISK_BYTES,
+  maxFiles = MAX_CACHE_FILES,
+): string[] {
+  const sorted = [...candidates].sort((a, b) =>
+    b.touchedMs - a.touchedMs || a.name.localeCompare(b.name));
+  let kept = 0;
+  let used = 0;
+  const evictions: string[] = [];
+  for (const file of sorted) {
+    if (!Number.isSafeInteger(file.bytes) || file.bytes < HEADER_BYTES ||
+        file.bytes > MAX_ENTRY_BYTES || !Number.isFinite(file.touchedMs) ||
+        kept >= maxFiles || used + file.bytes > maxBytes) {
+      evictions.push(file.name);
+      continue;
+    }
+    kept++;
+    used += file.bytes;
+  }
+  return evictions;
+}
 
 export interface NativeWaveformSourceSignature {
   canonicalPath: string;
@@ -200,25 +236,42 @@ export async function readNativeWaveformCache(
   }
 }
 
+/**
+ * Quota and interrupted-write recovery. Scan ALL app-owned peak entries, but
+ * limit concurrent filesystem operations so a large cache cannot flood the
+ * event loop with thousands of simultaneous lstat calls.
+ */
 async function pruneNativeWaveformCache(root: string): Promise<void> {
-  const entries = (await fs.readdir(root, { withFileTypes: true }))
-    .filter(item => item.isFile() && CACHE_FILENAME.test(item.name))
-    .slice(0, MAX_CACHE_FILES);
-  const candidates = await Promise.all(entries.map(async item => {
-    const p = path.join(root, item.name);
-    try {
-      const s = await fs.lstat(p);
-      return s.isFile() && !s.isSymbolicLink() ? { p, bytes: s.size, time: s.mtimeMs } : null;
-    } catch { return null; }
-  }));
-  const files = candidates.filter((x): x is NonNullable<typeof x> => x !== null)
-    .sort((a, b) => b.time - a.time);
-  let size = files.reduce((sum, file) => sum + file.bytes, 0);
-  for (let i = files.length - 1; size > MAX_DISK_BYTES && i >= 0; i--) {
-    try {
-      await fs.unlink(files[i].p);
-      size -= files[i].bytes;
-    } catch { /* Cache eviction must never block audio. */ }
+  const dirents = await fs.readdir(root, { withFileTypes: true });
+  const files: NativeCacheCandidate[] = [];
+  const staleTemp: string[] = [];
+  const cutoff = Date.now() - CACHE_TEMP_TTL_MS;
+  const owned = dirents.filter(item => item.isFile() &&
+    (CACHE_FILENAME.test(item.name) || CACHE_TEMP_FILENAME.test(item.name)));
+
+  for (let offset = 0; offset < owned.length; offset += 32) {
+    const batch = owned.slice(offset, offset + 32);
+    await Promise.all(batch.map(async item => {
+      const pathname = path.join(root, item.name);
+      try {
+        const info = await fs.lstat(pathname);
+        if (!info.isFile() || info.isSymbolicLink()) return;
+        if (CACHE_FILENAME.test(item.name)) {
+          files.push({ name: item.name, bytes: info.size, touchedMs: info.mtimeMs });
+        } else if (info.mtimeMs < cutoff) {
+          staleTemp.push(pathname);
+        }
+      } catch { /* Concurrent edits and read-only caches are non-fatal. */ }
+    }));
+  }
+
+  for (const filename of planNativeWaveformEvictions(files)) {
+    try { await fs.unlink(path.join(root, filename)); }
+    catch { /* Best-effort cache eviction. */ }
+  }
+  for (const pathname of staleTemp) {
+    try { await fs.unlink(pathname); }
+    catch { /* Interrupted temporary files are non-critical. */ }
   }
 }
 
