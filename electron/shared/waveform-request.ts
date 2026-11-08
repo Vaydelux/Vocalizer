@@ -21,13 +21,3 @@ export function sameWaveformRequest(
     active.requestId === incoming.requestId;
 }
 
-/**
- * Prevent an older async stem-registry lookup from taking over the active
- * decoder after a newer waveform request has already been received.
- */
-export function isCurrentWaveformInvocation(
-  newestInvocation: number,
-  requestInvocation: number,
-): boolean {
-  return newestInvocation === requestInvocation;
-}
