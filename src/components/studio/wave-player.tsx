@@ -157,6 +157,9 @@ const WavePlayerImpl: ForwardRefRenderFunction<WavePlayerHandle, Props> = (
     // A discarded player must stop incremental peak work, not just ignore it.
     const peakAbort = new AbortController();
     let nativePeakStarted = false;
+    const nativeWaveformRequest = track.nativeStem && isNative()
+      ? { ...track.nativeStem, requestId: globalThis.crypto.randomUUID() }
+      : null;
     const audio = new Audio();
     audio.crossOrigin = "anonymous";
     audio.preload = shouldPreloadMetadataOnly(track) ? "metadata" : "auto";
@@ -222,11 +225,11 @@ const WavePlayerImpl: ForwardRefRenderFunction<WavePlayerHandle, Props> = (
         }
         // Native published stems use main-owned FFmpeg decoding. Only bounded
         // float32 min/max envelopes cross IPC, never full decoded PCM.
-        if (track.nativeStem && isNative()) {
+        if (nativeWaveformRequest) {
           const api = native();
           if (!api) return;
           nativePeakStarted = true;
-          const result = await api.generateInferenceWaveform(track.nativeStem);
+          const result = await api.generateInferenceWaveform(nativeWaveformRequest);
           if (cancelled || peakAbort.signal.aborted) return;
           const ordered = [...result.levels].sort((a, b) => b.fps - a.fps);
           if (ordered.length !== 3 || ordered.some(level =>
@@ -270,8 +273,8 @@ const WavePlayerImpl: ForwardRefRenderFunction<WavePlayerHandle, Props> = (
     return () => {
       cancelled = true;
       peakAbort.abort();
-      if (nativePeakStarted && track.nativeStem) {
-        void native()?.cancelInferenceWaveform(track.nativeStem).catch(() => { /* closed */ });
+      if (nativePeakStarted && nativeWaveformRequest) {
+        void native()?.cancelInferenceWaveform(nativeWaveformRequest).catch(() => { /* closed */ });
       }
       cancelAnimationFrame(rafRef.current);
       audio.removeEventListener("loadstart", onLoadStart);
