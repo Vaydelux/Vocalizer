@@ -174,3 +174,30 @@ back to their exact source and Windows runner artifacts.
 This test does not instantiate Web Audio, a real Electron waveform canvas, a
 compressed codec or the native worker. Actual renderer/GPU frame timing and
 physical Windows long-file testing remain mandatory release gates.
+
+## Native multiresolution waveform preview — experimental
+
+Previously, large file-backed AI stems showed a flat waveform because
+renderer-side Web Audio decoding was deliberately disabled for large files.
+The experimental native waveform engine now generates a real visual envelope
+for **verified published/relinked stems** using bundled FFmpeg.
+
+- Main authorizes the same job ID + stem identity as privileged playback.
+  Renderer-provided filesystem paths are never accepted.
+- FFmpeg streams mono 8 kHz float32 PCM, and main reduces incoming chunks into
+  peak envelopes at **40, 10 and 2 buckets per second**; no full decoded
+  recording is materialized in memory.
+- Zoomed-in views use denser peaks; long overview views use 2 Hz peaks.
+  All resolutions count toward the existing 32 MiB in-memory LRU budget.
+- A four-hour maximum duration, five-minute timeout and one active decoder
+  constrain processing. Abandoned work is cancelled on player close/switch.
+- The packaged Windows smoke test exercises FFmpeg waveform decoding from
+  a synthetic WAV through privileged IPC and verifies all three resolutions.
+- Failure to generate peaks leaves audio playback functional and falls back to
+  the existing flat-line placeholder.
+
+**Limitations:** The 8 kHz downsampled visual envelope is not sample-accurate
+mastering analysis. Peaks persist only in the renderer LRU for the current
+session. Persistent integrity-checked disk caching and arbitrary giant
+user-imported file waveforms are future milestones. Physical long-session
+Windows rendering/codec QA remains a separate release gate.

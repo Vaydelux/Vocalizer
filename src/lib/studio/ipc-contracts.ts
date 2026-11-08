@@ -154,6 +154,18 @@ export interface NativeStemRelinkResponse {
   }>;
 }
 
+export interface NativeWaveformLevel {
+  fps: number;
+  buckets: number;
+  minMax: Float32Array;
+}
+
+export interface NativeWaveformResult {
+  duration: number;
+  sampleRate: number;
+  levels: NativeWaveformLevel[];
+}
+
 export interface StudioNativeApi {
   isNative: true;
   /** Resolve the real filesystem path of a renderer File selection (Electron webUtils). */
@@ -186,6 +198,8 @@ export interface StudioNativeApi {
   cancelInference(req: { jobId: string }): Promise<{ cancelled: boolean }>;
   revealInferenceStem(req: { jobId: string; stem: InferenceStemResult["stem"] }): Promise<{ revealed: boolean }>;
   probeInferenceStem(req: { jobId: string; stem: InferenceStemResult["stem"] }): Promise<NativeAudioMeta>;
+  generateInferenceWaveform(req: { jobId: string; stem: InferenceStemResult["stem"] }): Promise<NativeWaveformResult>;
+  cancelInferenceWaveform(req: { jobId: string; stem: InferenceStemResult["stem"] }): Promise<{ cancelled: boolean }>;
   relinkInferenceStems(req: NativeStemRelinkRequest): Promise<NativeStemRelinkResponse>;
   onInferenceProgress(cb: (p: InferenceProgress) => void): () => void;
   getSettings(): Promise<NativeSettings>;

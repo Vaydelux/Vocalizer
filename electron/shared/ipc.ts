@@ -13,6 +13,7 @@
  */
 
 import { z } from "zod";
+import type { NativeWaveformResult } from "./native-waveform";
 
 /* ------------------------------- channels ---------------------------------- */
 
@@ -37,6 +38,8 @@ export const IPC = {
   INFERENCE_PROGRESS: "inference:progress",
   INFERENCE_REVEAL_STEM: "inference:revealStem",
   INFERENCE_PROBE_STEM: "inference:probeStem",
+  INFERENCE_STEM_WAVEFORM: "inference:stemWaveform",
+  INFERENCE_CANCEL_STEM_WAVEFORM: "inference:cancelStemWaveform",
   INFERENCE_RELINK_STEMS: "inference:relinkStems",
 } as const;
 
@@ -334,6 +337,8 @@ export interface StudioNativeApi {
   revealInferenceStem(req: { jobId: string; stem: InferenceStemResult["stem"] }): Promise<{ revealed: boolean }>;
   /** Privileged FFprobe, only for completed and still registered stem outputs. */
   probeInferenceStem(req: { jobId: string; stem: InferenceStemResult["stem"] }): Promise<NativeAudioMeta>;
+  generateInferenceWaveform(req: { jobId: string; stem: InferenceStemResult["stem"] }): Promise<NativeWaveformResult>;
+  cancelInferenceWaveform(req: { jobId: string; stem: InferenceStemResult["stem"] }): Promise<{ cancelled: boolean }>;
   relinkInferenceStems(req: NativeStemRelinkRequest): Promise<NativeStemRelinkResponse>;
   onInferenceProgress(cb: (p: InferenceProgress) => void): () => void;
   getSettings(): Promise<NativeSettings>;

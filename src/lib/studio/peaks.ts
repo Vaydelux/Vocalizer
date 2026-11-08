@@ -14,6 +14,8 @@ export interface Peaks {
   fps: number;
   duration: number;
   sampleRate: number;
+  /** Optional lower-resolution summaries, included in LRU memory accounting. */
+  overviewLevels?: Peaks[];
 }
 
 export const PEAKS_FPS = 40;
@@ -29,7 +31,12 @@ const cache = new Map<string, CachedPeaks>();
 let cacheSizeBytes = 0;
 
 function peakBytes(peaks: Peaks): number {
-  return peaks.channels.reduce((total, channel) => total + channel.byteLength, 0);
+  const high = peaks.channels.reduce((total, channel) => total + channel.byteLength, 0);
+  const summaries = peaks.overviewLevels?.reduce(
+    (total, level) => total + level.channels.reduce((n, channel) => n + channel.byteLength, 0),
+    0,
+  ) ?? 0;
+  return high + summaries;
 }
 
 /** Returns only peaks belonging to this exact source, and marks the hit recent. */
