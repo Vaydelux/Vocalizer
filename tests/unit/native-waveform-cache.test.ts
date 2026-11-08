@@ -92,6 +92,10 @@ describe("persistent native waveform cache", () => {
     const bytes = encodeNativeWaveformCache(src, fixture());
     bytes.writeUInt32LE(60, 88);
     expect(() => decodeNativeWaveformCache(src, bytes)).toThrow();
+    // Even a plausible duration change must invalidate the header checksum.
+    const forgedMetadata = encodeNativeWaveformCache(src, fixture());
+    forgedMetadata.writeDoubleLE(0.06, 16);
+    expect(() => decodeNativeWaveformCache(src, forgedMetadata)).toThrow();
   });
 
   it("rejects symlinked cache entries instead of following them", async () => {
