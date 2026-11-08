@@ -72,6 +72,23 @@ jobs:
           path: reports/peak-benchmark-windows.json
           retention-days: 14
           if-no-files-found: error
+      - name: Run Windows native waveform cache filesystem unit tests
+        shell: pwsh
+        run: |
+          bun test tests/unit/native-waveform-cache.test.ts tests/unit/native-waveform.test.ts
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Soak-test synthetic 90-minute waveform cache
+        shell: pwsh
+        run: |
+          bun scripts/soak-waveform-cache.ts --output reports/waveform-cache-soak-windows.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Upload waveform cache soak (Windows)
+        uses: actions/upload-artifact@v4
+        with:
+          name: vocalizer-waveform-cache-soak-windows-${{ github.sha }}
+          path: reports/waveform-cache-soak-windows.json
+          retention-days: 14
+          if-no-files-found: error
       - name: Install CPU inference dependencies
         shell: pwsh
         run: |
