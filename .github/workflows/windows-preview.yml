@@ -60,6 +60,18 @@ jobs:
           path: reports/stem-stream-windows.json
           retention-days: 14
           if-no-files-found: error
+      - name: Benchmark incremental waveform peak extraction
+        shell: pwsh
+        run: |
+          bun scripts/benchmark-peaks.ts --output reports/peak-benchmark-windows.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Upload incremental peak benchmark (Windows)
+        uses: actions/upload-artifact@v4
+        with:
+          name: vocalizer-peak-benchmark-windows-${{ github.sha }}
+          path: reports/peak-benchmark-windows.json
+          retention-days: 14
+          if-no-files-found: error
       - name: Install CPU inference dependencies
         shell: pwsh
         run: |

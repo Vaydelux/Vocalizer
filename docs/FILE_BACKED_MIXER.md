@@ -152,3 +152,25 @@ AI stems still use metadata-only preview without renderer full-file decoding.
 It does **not** add waveform peak extraction from multi-GB files; that would
 require a separate bounded native FFmpeg peak service. Manual long-session
 GUI testing remains a release gate.
+
+## Synthetic peak-processing benchmark
+
+Both source CI (Linux) and packaged preview CI (Windows) record a deterministic
+**90-second, 48-kHz, two-channel Float32** fixture and run the incremental
+waveform envelope extractor. The benchmark compares the completed async
+envelope with the synchronous reference using SHA-256, records elapsed and CPU
+time, samples process RSS, and confirms that at least one timer ran during
+the async operation. Output JSON artifacts are retained for 14 days:
+
+```powershell
+bun scripts/benchmark-peaks.ts --output reports/peak-benchmark.json
+```
+
+The 45-second elapsed and 96 MiB sampled process-RSS thresholds are generous
+CI regression guards, **not** production targets. Numbers from different CI
+runner generations should not be directly compared as performance baselines.
+The report includes the checked-out commit SHA so measurements can be traced
+back to their exact source and Windows runner artifacts.
+This test does not instantiate Web Audio, a real Electron waveform canvas, a
+compressed codec or the native worker. Actual renderer/GPU frame timing and
+physical Windows long-file testing remain mandatory release gates.
