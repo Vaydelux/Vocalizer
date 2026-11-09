@@ -49,6 +49,10 @@ import { decodeFile } from "@/lib/studio/decode";
 import { native, isNative } from "@/lib/studio/native";
 import { planWaveformViewport, waveformTimeAtPointer } from "@/lib/studio/waveform-viewport";
 import { planWaveformRaster } from "@/lib/studio/waveform-raster";
+import {
+  applyPlayerVolume, changePlayerVolume, createPlayerVolumeState,
+  togglePlayerMute, type PlayerVolumeState,
+} from "@/lib/studio/player-volume";
 import { mayComputeFullWaveform, shouldPreloadMetadataOnly } from "@/lib/studio/waveform-policy";
 import { formatTime } from "@/lib/studio/format";
 import type { AudioTrack } from "@/lib/studio/types";
@@ -128,8 +132,11 @@ const WavePlayerImpl: ForwardRefRenderFunction<WavePlayerHandle, Props> = (
   const [playing, setPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
-  const [volume, setVolume] = useState(() => useSettings.getState().volume);
-  const [muted, setMuted] = useState(false);
+  const [volumeState, setVolumeState] = useState(() =>
+    createPlayerVolumeState(useSettings.getState().volume),
+  );
+  const volumeStateRef = useRef(volumeState);
+  const { volume, muted } = volumeState;
   const [loop, setLoop] = useState(false);
   const [region, setRegionState] = useState<RegionRange | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -164,7 +171,7 @@ const WavePlayerImpl: ForwardRefRenderFunction<WavePlayerHandle, Props> = (
     audio.crossOrigin = "anonymous";
     audio.preload = shouldPreloadMetadataOnly(track) ? "metadata" : "auto";
     audioRef.current = audio;
-    audio.volume = muted ? 0 : volume;
+    applyPlayerVolume(audio, volumeStateRef.current);
 
     const onLoadStart = () => {
       if (cancelled) return;
@@ -530,19 +537,25 @@ const WavePlayerImpl: ForwardRefRenderFunction<WavePlayerHandle, Props> = (
     setZoom(FIT_ZOOM);
   }, []);
 
-  const applyVolume = useCallback((v: number) => {
-    setVolume(v);
-    setMuted(v === 0);
-    if (audioRef.current) audioRef.current.volume = v;
-    useSettings.getState().update({ volume: v });
+  // Keep the native media element and React state in sync, including a
+  // volume slider change while muted. Use a ref to avoid stale rapid clicks.
+  const commitVolumeState = useCallback((next: PlayerVolumeState) => {
+    const previous = volumeStateRef.current;
+    volumeStateRef.current = next;
+    setVolumeState(next);
+    if (audioRef.current) applyPlayerVolume(audioRef.current, next);
+    if (next.volume !== previous.volume) {
+      useSettings.getState().update({ volume: next.volume });
+    }
   }, []);
 
+  const applyVolume = useCallback((v: number) => {
+    commitVolumeState(changePlayerVolume(volumeStateRef.current, v));
+  }, [commitVolumeState]);
+
   const toggleMute = useCallback(() => {
-    setMuted((m) => {
-      if (audioRef.current) audioRef.current.muted = !m;
-      return !m;
-    });
-  }, []);
+    commitVolumeState(togglePlayerMute(volumeStateRef.current));
+  }, [commitVolumeState]);
 
   /* ----------------------------- pointer interactions ------------------------ */
   const timeFromX = useCallback(
