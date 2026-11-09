@@ -24,10 +24,13 @@ export interface FfmpegOp {
   cents?: number;
   tempo?: number;
   preserveDuration?: boolean;
-  sampleRate?: 44100 | 48000 | null;
+  /** Convert accepts 44.1/48 kHz; native Joiner also permits source-native rates. */
+  sampleRate?: number | null;
   // join
   inputPaths?: string[];
   crossfadeSec?: number;
+  overlapSeconds?: number[];
+  channels?: 1 | 2;
   // mix
   instrumentalPath?: string;
   vocalPath?: string;

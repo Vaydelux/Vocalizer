@@ -19,6 +19,7 @@ import { native, isNative } from "./native";
 import { nativeStemInput } from "../../../electron/shared/stem-input";
 import { baseName, sanitizeFileName, timestampSlug } from "./format";
 import { studioError } from "./errors";
+import { planJoinTimeline } from "../../../electron/shared/join-timeline";
 
 /** Resolve the real disk path of a renderer File selection via the Electron
  *  webUtils API exposed on window.studio (the deprecated File.path is avoided). */
@@ -147,10 +148,37 @@ export async function nativeTrimTask(
 }
 
 export async function nativeJoinTask(
-  input: { tracks: AudioTrack[]; crossfadeSec: number; override?: FormatOverride },
+  input: {
+    tracks: AudioTrack[];
+    crossfadeSec: number;
+    sampleRatePref: "auto" | 44100 | 48000;
+    channels: 1 | 2 | "auto";
+    override?: FormatOverride;
+  },
   ctx: JobCtx
 ): Promise<JobResultFile> {
   const fmt = input.override?.format ?? "wav16";
+  const sourceRate = input.sampleRatePref === "auto"
+    ? input.tracks[0]?.meta?.sampleRate ?? 48000
+    : input.sampleRatePref;
+  const sampleRate = Number.isSafeInteger(sourceRate) && sourceRate >= 8000 && sourceRate <= 192000
+    ? sourceRate : 48000;
+  const channels: 1 | 2 = input.channels === "auto"
+    ? input.tracks[0]?.meta?.channels === 1 ? 1 : 2
+    : input.channels;
+
+  let overlapSeconds: number[] | undefined;
+  if (input.crossfadeSec > 0) {
+    const durations = input.tracks.map((t) => t.meta?.duration);
+    if (durations.some((duration) => duration === null || duration === undefined ||
+        !Number.isFinite(duration) || duration <= 0)) {
+      throw studioError("INPUT_INVALID", "All joined tracks need measured durations before crossfading.");
+    }
+    const frames = durations.map((duration) => Math.max(1, Math.floor(duration! * sampleRate)));
+    const plan = planJoinTimeline(frames, Math.round(input.crossfadeSec * sampleRate));
+    overlapSeconds = plan.overlapFrames.map((overlap) => overlap / sampleRate);
+  }
+
   const outputPath = await chooseOutputPath(input.tracks.map((t) => baseName(t.name)).join("+"), fmt);
   ctx.log(`FFmpeg join ${input.tracks.length} tracks → ${outputPath}`);
   const op: FfmpegOp = {
@@ -158,6 +186,9 @@ export async function nativeJoinTask(
     kind: "join",
     inputPaths: input.tracks.map((t) => trackSourcePath(t)),
     crossfadeSec: input.crossfadeSec,
+    overlapSeconds,
+    sampleRate,
+    channels,
     outputFormat: mapFormat(fmt),
     outputPath,
   };

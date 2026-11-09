@@ -117,6 +117,10 @@ export const joinOpSchema = z.object({
   kind: z.literal("join"),
   inputPaths: z.array(z.string().min(1).max(4096)).min(2).max(64),
   crossfadeSec: z.number().min(0).max(10).default(0),
+  /** Actual per-boundary overlaps based on probed durations. */
+  overlapSeconds: z.array(z.number().finite().min(0).max(10)).max(63).optional(),
+  sampleRate: z.number().int().min(8000).max(192000).optional(),
+  channels: z.union([z.literal(1), z.literal(2)]).optional(),
 });
 export const pitchOpSchema = z.object({
   ...baseOp,

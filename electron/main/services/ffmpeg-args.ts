@@ -67,21 +67,51 @@ function buildTrim(op: Extract<FfmpegOp, { kind: "trim" }>): BuiltCommand {
   };
 }
 
-/** Build the FFmpeg argv for a join. Concat filter for N inputs (re-encode). */
+/** Build a join chain that actually honors the requested crossfade.
+ * Inputs are normalized to a common format so joins of different codecs,
+ * channel counts or sample rates do not fail during filter negotiation. */
 function buildJoin(op: Extract<FfmpegOp, { kind: "join" }>): BuiltCommand {
   const enc = encoderArgs(op.outputFormat);
-  const inputs: string[] = [];
-  for (const p of op.inputPaths) inputs.push("-i", p);
   const n = op.inputPaths.length;
-  // concat filter (audio only): [0][1]...[n-1]concat=n=N:v=0:a=1[out]
-  const labels = op.inputPaths.map((_, i) => `[${i}]`).join("");
-  const filter = `${labels}concat=n=${n}:v=0:a=1[out]`;
+  const overlaps = op.overlapSeconds ?? Array(n - 1).fill(op.crossfadeSec);
+  if (n < 2 || overlaps.length !== n - 1) {
+    throw new Error("Native join requires one overlap value per adjacent input pair.");
+  }
+  const sampleRate = op.sampleRate ?? 48000;
+  const channels = op.channels ?? 2;
+  const layout = channels === 1 ? "mono" : "stereo";
+  const filters: string[] = [];
+  for (let i = 0; i < n; i++) {
+    filters.push(
+      `[${i}:a]aresample=${sampleRate},aformat=sample_fmts=fltp:channel_layouts=${layout},asetpts=PTS-STARTPTS[a${i}]`,
+    );
+  }
+
+  let previous = "a0";
+  for (let i = 1; i < n; i++) {
+    const seconds = overlaps[i - 1];
+    if (!Number.isFinite(seconds) || seconds < 0 || seconds > 10) {
+      throw new Error("Invalid native join crossfade duration.");
+    }
+    // Extremely small overlaps are rounded to a straight join rather than
+    // passing a zero-sample duration to FFmpeg acrossfade.
+    const frames = Math.round(seconds * sampleRate);
+    const output = `joined${i}`;
+    const filter = frames >= 2
+      ? `acrossfade=d=${(frames / sampleRate).toFixed(6)}:c1=qsin:c2=qsin`
+      : "concat=n=2:v=0:a=1";
+    filters.push(`[${previous}][a${i}]${filter}[${output}]`);
+    previous = output;
+  }
+
+  const inputs = op.inputPaths.flatMap((p) => ["-i", p]);
   return {
     argv: [
-      "-nostdin", "-n",
-      ...inputs,
-      "-filter_complex", filter,
-      "-map", "[out]",
+      "-nostdin", "-n", ...inputs,
+      "-filter_complex", filters.join(";"),
+      "-map", `[${previous}]`,
+      "-ar", String(sampleRate),
+      "-ac", String(channels),
       "-acodec", enc.codec,
       ...enc.extra,
       op.outputPath,

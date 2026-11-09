@@ -127,7 +127,13 @@ export interface JoinTaskInput {
 export function makeJoinTask(input: JoinTaskInput) {
   if (isNative()) {
     return (ctx: JobCtx) => nativeJoinTask(
-      { tracks: input.tracks, crossfadeSec: input.crossfadeSec, override: { format: input.format, mp3Bitrate: input.mp3Bitrate } },
+      {
+        tracks: input.tracks,
+        crossfadeSec: input.crossfadeSec,
+        sampleRatePref: input.sampleRatePref,
+        channels: input.channels,
+        override: { format: input.format, mp3Bitrate: input.mp3Bitrate },
+      },
       ctx
     );
   }
