@@ -130,3 +130,23 @@ wraparound and compare levels against the original source.
 
 A green source test proves header sizes and PCM arithmetic, not perceptual
 quality, codec compatibility or stability on low-memory Windows systems.
+
+## Native Joiner and crossfade quality
+
+Join at least two clips in each configuration:
+
+1. Two equal-length WAV clips, 0-second crossfade: output duration is the sum
+   and there is no missing tail or unexpected overlap.
+2. Two clips with a 0.5-second crossfade: verify both sources actually
+   overlap near the boundary, rather than starting the second clip late.
+3. Three clips with a short middle item: overlap is capped to half of either
+   adjacent clip, so fade-in and fade-out of the middle clip cannot intersect.
+4. Join 44.1 kHz mono WAV with 48 kHz stereo MP3/FLAC in Windows: the
+   exported stream must use the selected sample rate and channel count.
+5. Listen near transitions and compare the output duration to the Joiner
+   estimate. Equal-power fades may increase peaks for highly correlated
+   sources, so inspect peak levels for clipping.
+
+The automated timeline and FFmpeg argument tests cover scheduling and
+validation. A Windows FFmpeg smoke run verifies actual mixed-rate encoding;
+perceptual listening and device compatibility remain physical QA requirements.
