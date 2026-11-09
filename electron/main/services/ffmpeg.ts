@@ -22,13 +22,16 @@ import { buildFfmpegCommand } from "./ffmpeg-args";
 import { getFfmpegPath } from "./paths";
 import { createStagedOutput, publishStagedOutput, cleanupStagedOutput } from "./export-file";
 import { probeFile } from "./ffprobe";
-import { studioError, toMainErrorPayload, type MainErrorCode } from "./errors";
+import { assertOutputExtension } from "./ffmpeg-output-preflight";
+import { MainError, studioError, toMainErrorPayload, type MainErrorCode } from "./errors";
 import type { FfmpegOp, FfmpegResult, FfmpegProgress } from "../../shared/ipc";
 
 interface RunHandle {
-  proc: ChildProcess;
-  outputPath: string;
+  /** Null while FFprobe is verifying the source, before FFmpeg is spawned. */
+  proc: ChildProcess | null;
+  outputPath: string | null;
   aborted: boolean;
+  controller: AbortController;
 }
 
 const activeJobs = new Map<string, RunHandle>();
@@ -44,21 +47,48 @@ export async function runFfmpeg(op: FfmpegOp, emit: ProgressEmitter): Promise<Ff
   if (activeJobs.has(op.jobId)) {
     throw studioError("INPUT_INVALID", "A native audio operation already uses this job ID.");
   }
+  // Register before any async metadata probe. Cancellation during preflight
+  // must prevent a late FFmpeg spawn and must not create a partial export.
+  const handle: RunHandle = {
+    proc: null,
+    outputPath: null,
+    aborted: false,
+    controller: new AbortController(),
+  };
+  activeJobs.set(op.jobId, handle);
+
   let stagedPath: string;
+  let expectedCopyCodec: string | undefined;
+  let built: ReturnType<typeof buildFfmpegCommand>;
   try {
-    // Never feed FFmpeg the destination path. A failed -y output previously
-    // truncated or deleted user files, including pre-existing ones.
+    if (op.kind === "trim" && op.lossless) {
+      const source = await probeFile(op.inputPath, handle.controller.signal);
+      expectedCopyCodec = source.codec ?? undefined;
+      assertOutputExtension(op, source);
+    } else {
+      assertOutputExtension(op);
+    }
+    if (handle.aborted) throw studioError("CANCELLED", "Export cancelled before FFmpeg started.");
+    // Never feed FFmpeg the destination path. A failed output must never
+    // truncate or replace an existing user's file.
     stagedPath = createStagedOutput(op.outputPath);
+    handle.outputPath = stagedPath;
+    built = buildFfmpegCommand({ ...op, outputPath: stagedPath });
+    if (handle.aborted) throw studioError("CANCELLED", "Export cancelled before FFmpeg started.");
   } catch (error) {
-    throw studioError("PERMISSION_DENIED", error instanceof Error ? error.message : "Cannot prepare an audio export.");
+    activeJobs.delete(op.jobId);
+    if (handle.outputPath) cleanupStagedOutput(handle.outputPath);
+    if (handle.aborted) throw studioError("CANCELLED", "Export cancelled before FFmpeg started.");
+    if (error instanceof Error && !(error instanceof MainError)) {
+      throw studioError("INPUT_INVALID", error.message);
+    }
+    throw error;
   }
-  const built = buildFfmpegCommand({ ...op, outputPath: stagedPath });
   const argv = built.argv;
 
   return new Promise<FfmpegResult>((resolve, reject) => {
     const proc = spawn(ffmpeg, argv, { shell: false, windowsHide: true });
-    const handle: RunHandle = { proc, outputPath: stagedPath, aborted: false };
-    activeJobs.set(op.jobId, handle);
+    handle.proc = proc;
 
     let stderr = "";
     let totalDuration: number | null = null;
@@ -109,7 +139,7 @@ export async function runFfmpeg(op: FfmpegOp, emit: ProgressEmitter): Promise<Ff
         return;
       }
       // Verify the output: exists, non-zero size, decodable.
-      verifyOutput(stagedPath)
+      verifyOutput(stagedPath, expectedCopyCodec)
         .then((verified) => {
           if (handle.aborted) {
             activeJobs.delete(op.jobId);
@@ -155,30 +185,29 @@ export function cancelJob(jobId: string): boolean {
   const handle = activeJobs.get(jobId);
   if (!handle) return false;
   handle.aborted = true;
-  // Encoding may already have exited while output verification is still in
-  // flight. The aborted flag is enough; do not kill an unrelated recycled PID.
-  if (handle.proc.exitCode !== null || handle.proc.signalCode !== null) {
+  handle.controller.abort();
+  const proc = handle.proc;
+  // A source probe may still be running. Cancelling before FFmpeg starts
+  // must be effective too, without attempting to kill a nonexistent child.
+  if (!proc || proc.exitCode !== null || proc.signalCode !== null) {
     return true;
   }
   try {
     if (process.platform === "win32") {
-      // Windows: kill the whole tree via taskkill (FFmpeg may spawn children).
-      if (handle.proc.pid) {
-        const killer = spawn("taskkill", ["/PID", String(handle.proc.pid), "/T", "/F"], {
+      if (proc.pid) {
+        const killer = spawn("taskkill", ["/PID", String(proc.pid), "/T", "/F"], {
           shell: false, windowsHide: true, stdio: "ignore",
         });
         killer.once("error", () => {
-          // On restricted hosts, try stopping the parent rather than crashing
-          // the entire Electron main process on an unhandled spawn error.
-          try { handle.proc.kill(); } catch { /* already exited */ }
+          try { proc.kill(); } catch { /* already exited */ }
         });
       } else {
-        try { handle.proc.kill(); } catch { /* already exited */ }
+        try { proc.kill(); } catch { /* already exited */ }
       }
     } else {
-      handle.proc.kill("SIGTERM");
+      proc.kill("SIGTERM");
       setTimeout(() => {
-        try { handle.proc.kill("SIGKILL"); } catch { /* already dead */ }
+        try { proc.kill("SIGKILL"); } catch { /* already dead */ }
       }, 500);
     }
   } catch {
@@ -203,7 +232,10 @@ async function maybeProbeSourceDuration(op: FfmpegOp): Promise<number | null> {
   }
 }
 
-async function verifyOutput(outputPath: string): Promise<{ verified: boolean; sizeBytes: number; durationSec: number }> {
+async function verifyOutput(
+  outputPath: string,
+  expectedCopyCodec?: string,
+): Promise<{ verified: boolean; sizeBytes: number; durationSec: number }> {
   let sizeBytes = 0;
   try {
     sizeBytes = fs.statSync(outputPath).size;
@@ -213,7 +245,13 @@ async function verifyOutput(outputPath: string): Promise<{ verified: boolean; si
   if (sizeBytes === 0) return { verified: false, sizeBytes: 0, durationSec: 0 };
   try {
     const meta = await probeFile(outputPath);
-    return { verified: meta.duration > 0, sizeBytes, durationSec: meta.duration };
+    // A stream-copy must retain the input audio codec exactly. An unexpected
+    // decoder/muxer result is not published even if it has nonzero duration.
+    return {
+      verified: meta.duration > 0 && (!expectedCopyCodec || meta.codec === expectedCopyCodec),
+      sizeBytes,
+      durationSec: meta.duration,
+    };
   } catch {
     return { verified: false, sizeBytes, durationSec: 0 };
   }
