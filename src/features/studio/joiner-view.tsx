@@ -26,6 +26,7 @@ import { makeJoinTask } from "@/lib/studio/tasks";
 import { useSettings } from "@/lib/studio/store-settings";
 import { ExportFormatSelect, useExportFormatDefault, type ExportFormatValue } from "@/components/studio/export-format-select";
 import { formatBytes, formatTime } from "@/lib/studio/format";
+import { planJoinTimeline } from "../../../electron/shared/join-timeline";
 
 interface Item {
   trackId: string;
@@ -98,15 +99,20 @@ export function JoinerView() {
   const remove = (idx: number) => setItems((prev) => prev.filter((_, i) => i !== idx));
 
   const totalDuration = useMemo(() => {
-    let total = 0;
-    for (const item of items) {
-      const t = getTrackById(item.trackId);
-      if (!t?.meta) return null;
-      total += t.meta.duration;
-      if (crossfade > 0 && total > 0) total -= crossfade;
+    if (items.length === 0) return 0;
+    const selected = items.map((item) => tracks.find((t) => t.id === item.trackId));
+    if (selected.some((track) => !track?.meta || !Number.isFinite(track.meta.duration))) return null;
+    const firstRate = selected[0]?.meta?.sampleRate;
+    const preferred = sampleRatePref === "auto" ? firstRate ?? 48000 : sampleRatePref;
+    const rate = Number.isSafeInteger(preferred) && preferred >= 8000 && preferred <= 192000
+      ? preferred : 48000;
+    try {
+      const lengths = selected.map((track) => Math.max(1, Math.ceil(track!.meta!.duration * rate)));
+      return planJoinTimeline(lengths, Math.round(crossfade * rate)).totalFrames / rate;
+    } catch {
+      return null;
     }
-    return items.length > 0 ? Math.max(0, total) : 0;
-  }, [items, crossfade]);
+  }, [items, tracks, crossfade, sampleRatePref]);
 
   const missing = useMemo(
     () => items.filter((i) => !getTrackById(i.trackId) || getTrackById(i.trackId)!.status !== "ready").length,
