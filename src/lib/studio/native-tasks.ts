@@ -20,6 +20,8 @@ import { nativeStemInput } from "../../../electron/shared/stem-input";
 import { baseName, sanitizeFileName, timestampSlug } from "./format";
 import { studioError } from "./errors";
 import { planJoinTimeline } from "../../../electron/shared/join-timeline";
+import { resolveNativeExportSettings, type NativeExportOverride } from "./native-export-settings";
+import { useSettings } from "./store-settings";
 
 /** Resolve the real disk path of a renderer File selection via the Electron
  *  webUtils API exposed on window.studio (the deprecated File.path is avoided). */
@@ -58,9 +60,6 @@ function extFor(format: ExportFormat): string {
   return format === "mp3" ? "mp3" : "wav";
 }
 
-function bitrate(override?: { mp3Bitrate?: Mp3Bitrate }): number {
-  return override?.mp3Bitrate ?? 192;
-}
 
 /** Ask the user for a real save path; throws CANCELLED if they back out. */
 async function chooseOutputPath(defaultName: string, format: ExportFormat): Promise<string> {
@@ -112,10 +111,7 @@ async function runAndWrap(op: FfmpegOp, ctx: JobCtx, outputPath: string): Promis
   }
 }
 
-interface FormatOverride {
-  format?: ExportFormat;
-  mp3Bitrate?: Mp3Bitrate;
-}
+type FormatOverride = NativeExportOverride;
 
 /* ----------------------------------- tasks --------------------------------- */
 
@@ -130,7 +126,9 @@ export async function nativeTrimTask(
   },
   ctx: JobCtx
 ): Promise<JobResultFile> {
-  const fmt = input.override?.format ?? "wav16";
+  const { format: fmt, mp3Bitrate } = resolveNativeExportSettings(
+    input.override, useSettings.getState(),
+  );
   const outputPath = await chooseOutputPath(input.track.name, fmt);
   ctx.log(`FFmpeg trim ${input.track.name} → ${outputPath}${input.lossless ? " [lossless copy]" : ""}`);
   const op: FfmpegOp = {
@@ -142,6 +140,7 @@ export async function nativeTrimTask(
     lossless: input.lossless,
     loudnessNormalize: input.loudnessNormalize,
     outputFormat: mapFormat(fmt),
+    mp3Bitrate,
     outputPath,
   };
   return await runAndWrap(op, ctx, outputPath);
@@ -157,7 +156,9 @@ export async function nativeJoinTask(
   },
   ctx: JobCtx
 ): Promise<JobResultFile> {
-  const fmt = input.override?.format ?? "wav16";
+  const { format: fmt, mp3Bitrate } = resolveNativeExportSettings(
+    input.override, useSettings.getState(),
+  );
   const sourceRate = input.sampleRatePref === "auto"
     ? input.tracks[0]?.meta?.sampleRate ?? 48000
     : input.sampleRatePref;
@@ -190,6 +191,7 @@ export async function nativeJoinTask(
     sampleRate,
     channels,
     outputFormat: mapFormat(fmt),
+    mp3Bitrate,
     outputPath,
   };
   return await runAndWrap(op, ctx, outputPath);
@@ -199,7 +201,9 @@ export async function nativePitchTask(
   input: { track: AudioTrack; semitones: number; cents: number; tempo: number; preserveDuration: boolean; override?: FormatOverride },
   ctx: JobCtx
 ): Promise<JobResultFile> {
-  const fmt = input.override?.format ?? "wav16";
+  const { format: fmt, mp3Bitrate } = resolveNativeExportSettings(
+    input.override, useSettings.getState(),
+  );
   const outputPath = await chooseOutputPath(input.track.name, fmt);
   ctx.log(`FFmpeg pitch ${input.semitones}st/${input.cents}c ×${input.tempo} → ${outputPath}`);
   const op: FfmpegOp = {
@@ -211,6 +215,7 @@ export async function nativePitchTask(
     tempo: input.tempo,
     preserveDuration: input.preserveDuration,
     outputFormat: mapFormat(fmt),
+    mp3Bitrate,
     outputPath,
   };
   return await runAndWrap(op, ctx, outputPath);
@@ -226,7 +231,9 @@ export async function nativeConvertTask(
   },
   ctx: JobCtx
 ): Promise<JobResultFile> {
-  const fmt = input.override?.format ?? "wav16";
+  const { format: fmt, mp3Bitrate } = resolveNativeExportSettings(
+    input.override, useSettings.getState(),
+  );
   const outputPath = await chooseOutputPath(input.friendlyName, fmt);
   ctx.log(`FFmpeg convert ${input.friendlyName} → ${outputPath}`);
   const op: FfmpegOp = {
@@ -236,6 +243,7 @@ export async function nativeConvertTask(
     sampleRate: input.sampleRate ?? null,
     loudnessNormalize: input.loudnessNormalize,
     outputFormat: mapFormat(fmt),
+    mp3Bitrate,
     outputPath,
   };
   return await runAndWrap(op, ctx, outputPath);
@@ -245,7 +253,9 @@ export async function nativeMixTask(
   input: { instrumental: AudioTrack; micFile: File; micStartSec: number; override?: FormatOverride },
   ctx: JobCtx
 ): Promise<JobResultFile> {
-  const fmt = input.override?.format ?? "wav16";
+  const { format: fmt, mp3Bitrate } = resolveNativeExportSettings(
+    input.override, useSettings.getState(),
+  );
   const outputPath = await chooseOutputPath(input.instrumental.name + "-mix", fmt);
   ctx.log(`FFmpeg mix → ${outputPath}`);
   const api = native();
@@ -276,6 +286,7 @@ export async function nativeMixTask(
       vocalPath: micPath,
       vocalStartSec: input.micStartSec,
       outputFormat: mapFormat(fmt),
+    mp3Bitrate,
       outputPath,
     };
     return await runAndWrap(op, ctx, outputPath);
@@ -305,7 +316,9 @@ export async function nativeMultitrackTask(
   },
   ctx: JobCtx
 ): Promise<JobResultFile> {
-  const fmt = input.override?.format ?? "wav16";
+  const { format: fmt, mp3Bitrate } = resolveNativeExportSettings(
+    input.override, useSettings.getState(),
+  );
   const defaultName = input.defaultName ?? "multitrack-master";
   const outputPath = await chooseOutputPath(defaultName, fmt);
   ctx.log(`FFmpeg multitrack mixdown (${input.lanes.length} lanes) → ${outputPath}`);
@@ -322,6 +335,7 @@ export async function nativeMultitrackTask(
     jobId: ctx.jobId,
     kind: "multitrack",
     outputFormat: mapFormat(fmt),
+    mp3Bitrate,
     outputPath,
     lanes: mappedLanes,
     masterGainDb: input.masterGainDb,
