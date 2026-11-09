@@ -6,7 +6,7 @@
  * Non-destructive: the source file is never modified; exports are new files.
  */
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Redo2, Scissors, SquareSplitHorizontal, Trash2, Undo2 } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/studio/page-header";
@@ -42,6 +42,10 @@ export function CutterView() {
   const [endText, setEndText] = useState("");
   const [fmt, setFmt] = useState<ExportFormatValue>(useExportFormatDefault());
   const [lossless, setLossless] = useState(false);
+  // Defer Electron bridge detection until after hydration so the disabled
+  // state is stable across Next's prerender and the desktop renderer.
+  const [desktopAvailable, setDesktopAvailable] = useState(false);
+  useEffect(() => setDesktopAvailable(isNative()), []);
   const [loudnorm, setLoudnorm] = useState(false);
 
   // Undo/redo of region edit instructions.
@@ -251,7 +255,7 @@ export function CutterView() {
                     <Switch
                       id="lossless-switch"
                       checked={lossless}
-                      disabled={!isNative()}
+                      disabled={!desktopAvailable}
                       onCheckedChange={(c) => {
                         setLossless(c);
                         if (c) setLoudnorm(false);
