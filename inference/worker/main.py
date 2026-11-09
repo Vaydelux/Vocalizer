@@ -80,6 +80,7 @@ def run_job_child(job_file: str) -> int:
             output_dir=req["outputDir"],
             requested_stems=req["requestedStems"],
             output_format=req.get("outputFormat", "wav"),
+            mp3_bitrate=req.get("mp3Bitrate", 320),
             device=req.get("device", "cpu"),
             on_progress=lambda p, s: emit({"type": "progress", "requestId": request_id, "progress": p, "stage": s}),
             profile=req.get("profile", "balanced"),
@@ -151,6 +152,7 @@ class JobRunner:
             "outputDir": req["outputDir"],
             "requestedStems": req["requestedStems"],
             "outputFormat": req.get("outputFormat", "wav"),
+            "mp3Bitrate": req.get("mp3Bitrate", 320),
             "device": req.get("device", "cpu"),
             # Forward the optional inference knob — dropping it here would
             # silently pin the child to the 256 default (found by live testing:
