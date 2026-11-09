@@ -97,6 +97,7 @@ class DemucsServiceTests(unittest.TestCase):
                 stems, model, device, fallback = separate_demucs(
                     DEMUCS_FILENAME, str(checkpoint), str(input_file), str(output),
                     list(FOUR_STEMS), "wav24", "cpu", "balanced", lambda *_: None,
+                    mp3_bitrate=128,
                 )
             self.assertEqual(stems, result)
             self.assertEqual((model, device, fallback), (DEMUCS_FILENAME, "cpu", False))
@@ -107,6 +108,7 @@ class DemucsServiceTests(unittest.TestCase):
             self.assertEqual(kwargs["profile"]["segment"], 7)
             self.assertEqual(kwargs["output_format"], "wav24")
             self.assertEqual(kwargs["chunk_seconds"], 24)
+            self.assertEqual(kwargs["mp3_bitrate"], 128)
 
 
 if __name__ == "__main__":

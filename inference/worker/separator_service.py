@@ -15,6 +15,7 @@ from audio_validation import verify_audio_file
 from local_model import require_local_mdx_model
 from inference_profiles import resolve_profile
 from stem_mapping import match_stems
+from audio_encoding_options import require_mp3_bitrate
 
 # Map a requested stem name to the audio-separator output-token convention.
 # MDX-Net Inst-HQ produces two files named "<input>_(Vocals)_..." and
@@ -48,7 +49,9 @@ class SeparatorService:
         on_progress,
         segment_size: int | None = None,
         profile: str = "balanced",
+        mp3_bitrate: int = 320,
     ) -> tuple[list[dict[str, Any]], str, str, bool]:
+        mp3_bitrate = require_mp3_bitrate(mp3_bitrate)
         if not os.path.isfile(input_path):
             raise WorkerError("inference-failed", f"Input file not found: {input_path}")
         if architecture == "demucs":
@@ -56,7 +59,8 @@ class SeparatorService:
                 raise WorkerError("architecture-unsupported", "Demucs uses validated local CPU profiles.")
             from demucs_service import separate_demucs
             return separate_demucs(model_id, model_path, input_path, output_dir,
-                                   requested_stems, output_format, device, profile, on_progress)
+                                   requested_stems, output_format, device, profile, on_progress,
+                                   mp3_bitrate=mp3_bitrate)
         if architecture != "mdx-net":
             raise WorkerError("architecture-unsupported", "This model architecture is not integrated.")
         if device not in ("cpu", "auto"):
@@ -76,12 +80,14 @@ class SeparatorService:
 
         on_progress(None, "Preparing")
         # Reuse a Separator per output format (the underlying model is cached).
-        cache_key = ":".join((architecture, str(verified_model), output_dir, output_format, str(preset["segment_size"]), str(preset["overlap"])))
+        cache_key = ":".join((architecture, str(verified_model), output_dir, output_format, str(preset["segment_size"]), str(preset["overlap"]),
+                              str(mp3_bitrate) if output_format == "mp3" else "lossless"))
         if cache_key not in self._separators:
             sep = ASeparator(
                 model_file_dir=str(verified_model.parent),
                 output_dir=output_dir,
                 output_format=output_format.upper() if output_format != "wav24" else "WAV",
+                output_bitrate=f"{mp3_bitrate}k" if output_format == "mp3" else None,
                 log_level=40,  # WARNING — keep stdout clean
                 mdx_params={
                     "hop_length": 1024,

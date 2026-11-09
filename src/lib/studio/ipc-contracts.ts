@@ -198,6 +198,7 @@ export interface StudioNativeApi {
     outputDir: string;
     requestedStems: string[];
     outputFormat: FfmpegFormat;
+    mp3Bitrate?: 128 | 192 | 256 | 320;
     device: "auto" | "cpu" | "cuda" | "directml";
     profile?: "low-memory" | "balanced" | "thorough";
   }): Promise<InferenceSeparateResult>;

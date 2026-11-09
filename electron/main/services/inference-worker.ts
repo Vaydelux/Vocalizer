@@ -287,6 +287,7 @@ export interface SeparateParams {
   outputDir: string;
   requestedStems: string[];
   outputFormat: "wav" | "wav24" | "mp3" | "flac";
+  mp3Bitrate?: 128 | 192 | 256 | 320;
   device: "auto" | "cpu" | "cuda" | "directml";
   profile?: "low-memory" | "balanced" | "thorough";
   onProgress?: (p: { progress: number | null; stage: string }) => void;
@@ -316,6 +317,7 @@ export async function runSeparation(params: SeparateParams): Promise<WorkerRespo
         outputDir: params.outputDir,
         requestedStems: params.requestedStems as ("Vocals" | "Instrumental" | "Drums" | "Bass" | "Guitar" | "Piano" | "Other")[],
         outputFormat: params.outputFormat,
+        mp3Bitrate: params.mp3Bitrate,
         device: params.device,
         profile: params.profile ?? "balanced",
       });

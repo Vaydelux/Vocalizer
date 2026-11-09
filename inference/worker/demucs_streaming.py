@@ -21,6 +21,7 @@ from typing import Any
 from audio_validation import verify_audio_file
 from demucs_chunks import plan_chunks
 from errors import WorkerError
+from audio_encoding_options import stem_codec_args, require_mp3_bitrate
 
 STEMS = ("Vocals", "Drums", "Bass", "Other")
 MAX_LONG_INPUT_SECONDS = 1800
@@ -47,6 +48,7 @@ def render_streaming_stems(
     input_duration: float,
     on_progress,
     chunk_seconds: float = CORE_SECONDS,
+    mp3_bitrate: int = 320,
 ) -> list[dict[str, str]]:
     try:
         import numpy as np
@@ -67,6 +69,7 @@ def render_streaming_stems(
         raise WorkerError("architecture-unsupported", "The selected checkpoint is not a four-stem model.")
     if output_format not in ("wav", "wav24", "flac", "mp3"):
         raise WorkerError("encoding-failed", "Unsupported output format.")
+    mp3_bitrate = require_mp3_bitrate(mp3_bitrate)
 
     destination = Path(output_dir)
     destination.mkdir(parents=True, exist_ok=True)
@@ -187,12 +190,7 @@ def render_streaming_stems(
         for index, stem in enumerate(STEMS):
             on_progress(0.9 + 0.08 * index / len(STEMS), "Encoding and verifying stems")
             gain = min(1.0, 0.999 / max(peak[stem], 1e-9))
-            codec = {
-                "wav": ["-c:a", "pcm_s16le"],
-                "wav24": ["-c:a", "pcm_s24le"],
-                "flac": ["-c:a", "flac", "-sample_fmt", "s32", "-bits_per_raw_sample", "24"],
-                "mp3": ["-c:a", "libmp3lame", "-b:a", "320k"],
-            }[output_format]
+            codec = stem_codec_args(output_format, mp3_bitrate)
             ffmpeg = os.environ.get("LAS_FFMPEG_PATH", "ffmpeg")
             argv = [
                 ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin", "-n",

@@ -48,6 +48,7 @@ export const inferenceSeparateSchema = z.object({
   outputDir: z.string().min(1).max(4096),
   requestedStems: z.array(z.enum(["Vocals", "Instrumental", "Drums", "Bass", "Guitar", "Piano", "Other"])).min(1),
   outputFormat: z.enum(["wav", "wav24", "mp3", "flac"]),
+  mp3Bitrate: z.union([z.literal(128), z.literal(192), z.literal(256), z.literal(320)]).optional(),
   device: z.enum(["auto", "cpu", "cuda", "directml"]),
   profile: z.enum(["low-memory", "balanced", "thorough"]).optional(),
 });
