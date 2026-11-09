@@ -91,9 +91,17 @@ export interface NativeAudioMeta {
 export const ffmpegFormatSchema = z.enum(["wav", "wav24", "mp3", "flac"]);
 export type FfmpegFormat = z.infer<typeof ffmpegFormatSchema>;
 
+/** Constrain user-chosen MP3 rates before any value reaches FFmpeg arguments. */
+export const mp3BitrateSchema = z.union([
+  z.literal(128), z.literal(192), z.literal(256), z.literal(320),
+]);
+export type Mp3Bitrate = z.infer<typeof mp3BitrateSchema>;
+
 const baseOp = {
   jobId: z.string().min(1).max(80),
   outputFormat: ffmpegFormatSchema,
+  /** Optional for older clients; FFmpeg defaults omitted values to 192 kbps. */
+  mp3Bitrate: mp3BitrateSchema.optional(),
   outputPath: z.string().min(1).max(4096),
 } as const;
 
