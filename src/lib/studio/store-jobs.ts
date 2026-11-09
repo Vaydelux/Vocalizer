@@ -17,6 +17,7 @@ import { toStudioError, studioError } from "./errors";
 import { formatBytes } from "./format";
 import { useSettings } from "./store-settings";
 import { recordJobReceipt } from "./job-journal";
+import { hasValidJobOutput, releaseBrowserJobOutput } from "./job-output";
 
 const MAX_LOGS = 100;
 const MAX_JOBS = 60;
@@ -97,6 +98,9 @@ async function runJob(id: string, label: string): Promise<void> {
     patchJob(id, { state: "running" });
     const result = await task(ctx);
     if (ctx.signal.aborted) {
+      // The encoder can complete its Blob just as cancellation wins. Without
+      // revocation this leaves the complete audio file allocated in memory.
+      releaseBrowserJobOutput(result);
       patchJob(id, {
         state: "cancelled",
         endedAt: Date.now(),
@@ -104,8 +108,9 @@ async function runJob(id: string, label: string): Promise<void> {
         error: { code: "CANCELLED", message: "Cancelled by user." },
       });
       appendLog(id, "Aborted — output discarded, nothing reported as completed.");
-    } else if (!result || result.size <= 0) {
-      throw toStudioError(new Error("Job produced an empty result."));
+    } else if (!hasValidJobOutput(result)) {
+      releaseBrowserJobOutput(result);
+      throw studioError("OUTPUT_EMPTY", "The job returned an invalid or empty byte count.");
     } else {
       patchJob(id, {
         state: "completed",
@@ -180,9 +185,7 @@ export const useJobs = create<JobStore>((set, get) => ({
         );
         if (index < 0) break;
         const [removed] = next.splice(index, 1);
-        if (removed.result?.url.startsWith("blob:")) {
-          URL.revokeObjectURL(removed.result.url);
-        }
+        releaseBrowserJobOutput(removed.result);
       }
       return { jobs: next };
     });
@@ -214,7 +217,7 @@ export const useJobs = create<JobStore>((set, get) => ({
       jobs: s.jobs.filter((j) => {
         if (["completed", "failed", "cancelled"].includes(j.state)) {
           // Temp-file cleanup: revoke the finalized output's object URL.
-          if (j.result?.url.startsWith("blob:")) URL.revokeObjectURL(j.result.url);
+          releaseBrowserJobOutput(j.result);
           return false;
         }
         return true;
@@ -226,7 +229,7 @@ export const useJobs = create<JobStore>((set, get) => ({
     tasks.delete(id);
     set((s) => ({
       jobs: s.jobs.filter((j) => {
-        if (j.id === id && j.result?.url.startsWith("blob:")) URL.revokeObjectURL(j.result.url);
+        if (j.id === id) releaseBrowserJobOutput(j.result);
         return j.id !== id;
       }),
     }));
