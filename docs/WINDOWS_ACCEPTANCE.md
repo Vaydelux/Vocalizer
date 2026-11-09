@@ -130,3 +130,20 @@ wraparound and compare levels against the original source.
 
 A green source test proves header sizes and PCM arithmetic, not perceptual
 quality, codec compatibility or stability on low-memory Windows systems.
+
+## Cancelled browser export and output URL cleanup
+
+Source regression coverage includes a race where the user cancels while an
+encoder is about to return its final Blob. The job must remain **cancelled**,
+must not advertise a completed result, and must release the newly created
+browser `blob:` URL instead of retaining the audio bytes in renderer memory.
+Invalid/empty byte counts are rejected before a job is marked completed.
+
+On a physical Windows debug build, repeat short export / cancel cycles with
+DevTools memory monitoring. Confirm that canceled results do not appear as
+completed in the queue and that memory returns toward baseline after garbage
+collection. Native disk-backed output paths are not removed by browser URL
+cleanup; native FFmpeg owns staging and cancellation separately.
+
+Synthetic unit tests prove lifecycle logic, not stable long-session memory
+usage, user-visible audio playback, or Windows filesystem behavior.
