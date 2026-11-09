@@ -6,10 +6,10 @@
  * metacharacters have no effect.
  */
 
-import type { FfmpegFormat, FfmpegOp } from "../../shared/ipc";
+import type { FfmpegFormat, FfmpegOp, Mp3Bitrate } from "../../shared/ipc";
 
 /** Encoder + extra args for an output format. */
-export function encoderArgs(format: FfmpegFormat, mp3Bitrate = 192): { codec: string; extra: string[] } {
+export function encoderArgs(format: FfmpegFormat, mp3Bitrate: Mp3Bitrate = 192): { codec: string; extra: string[] } {
   switch (format) {
     case "wav":
       return { codec: "pcm_s16le", extra: [] };
@@ -46,7 +46,7 @@ function buildTrim(op: Extract<FfmpegOp, { kind: "trim" }>): BuiltCommand {
       requiresRubberBand: false,
     };
   }
-  const enc = encoderArgs(op.outputFormat);
+  const enc = encoderArgs(op.outputFormat, op.mp3Bitrate);
   const extraArgs: string[] = [];
   if (op.loudnessNormalize) {
     extraArgs.push("-af", `loudnorm=I=${op.loudnessNormalize.targetLufs}:TP=${op.loudnessNormalize.truePeak}:LRA=11`);
@@ -71,7 +71,7 @@ function buildTrim(op: Extract<FfmpegOp, { kind: "trim" }>): BuiltCommand {
  * Inputs are normalized to a common format so joins of different codecs,
  * channel counts or sample rates do not fail during filter negotiation. */
 function buildJoin(op: Extract<FfmpegOp, { kind: "join" }>): BuiltCommand {
-  const enc = encoderArgs(op.outputFormat);
+  const enc = encoderArgs(op.outputFormat, op.mp3Bitrate);
   const n = op.inputPaths.length;
   const overlaps = op.overlapSeconds ?? Array(n - 1).fill(op.crossfadeSec);
   if (n < 2 || overlaps.length !== n - 1) {
@@ -128,7 +128,7 @@ function buildJoin(op: Extract<FfmpegOp, { kind: "join" }>): BuiltCommand {
  *   atempo correction for the tempo ratio. No special filter needed.
  */
 function buildPitch(op: Extract<FfmpegOp, { kind: "pitch" }>): BuiltCommand {
-  const enc = encoderArgs(op.outputFormat);
+  const enc = encoderArgs(op.outputFormat, op.mp3Bitrate);
   const semis = op.semitones + op.cents / 100;
   const pitchCents = semis * 100; // rubberband pitch is in cents
   const pitchRatio = Math.pow(2, semis / 12);
@@ -158,7 +158,7 @@ function buildPitch(op: Extract<FfmpegOp, { kind: "pitch" }>): BuiltCommand {
 
 /** Convert/re-encode a file (optionally resampling and normalizing loudness). */
 function buildConvert(op: Extract<FfmpegOp, { kind: "convert" }>): BuiltCommand {
-  const enc = encoderArgs(op.outputFormat);
+  const enc = encoderArgs(op.outputFormat, op.mp3Bitrate);
   const extra: string[] = [];
   if (op.sampleRate) extra.push("-ar", String(op.sampleRate));
   if (op.loudnessNormalize) {
@@ -172,7 +172,7 @@ function buildConvert(op: Extract<FfmpegOp, { kind: "convert" }>): BuiltCommand 
 
 /** Mix a vocal take onto an instrumental (amix, with delays + gains). */
 function buildMix(op: Extract<FfmpegOp, { kind: "mix" }>): BuiltCommand {
-  const enc = encoderArgs(op.outputFormat);
+  const enc = encoderArgs(op.outputFormat, op.mp3Bitrate);
   const ms = Math.round(op.vocalStartSec * 1000);
   // The instrumental begins at t=0. Only the recorded microphone take is
   // delayed by vocalStartSec. 'all=1' handles mono and multichannel audio.
@@ -189,7 +189,7 @@ function buildMix(op: Extract<FfmpegOp, { kind: "mix" }>): BuiltCommand {
 
 /** Build FFmpeg argv for a multi-track mixdown (N input tracks with independent gain, pan, delay, and effects). */
 function buildMultitrack(op: Extract<FfmpegOp, { kind: "multitrack" }>): BuiltCommand {
-  const enc = encoderArgs(op.outputFormat);
+  const enc = encoderArgs(op.outputFormat, op.mp3Bitrate);
   const inputArgs: string[] = [];
   const filterClauses: string[] = [];
   const laneLabels: string[] = [];

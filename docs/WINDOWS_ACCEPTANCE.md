@@ -167,3 +167,25 @@ Join at least two clips in each configuration:
 The automated timeline and FFmpeg argument tests cover scheduling and
 validation. A Windows FFmpeg smoke run verifies actual mixed-rate encoding;
 perceptual listening and device compatibility remain physical QA requirements.
+
+## Native FFmpeg MP3 bitrate verification
+
+The desktop audio editor must send the per-job selected MP3 bitrate (128, 192,
+256, or 320 kbps) through renderer IPC to FFmpeg for Trim (re-encode), Join,
+Pitch, Convert, Karaoke Mix, and Multitrack Mixdown. If no per-job setting is
+provided, use the saved preference. The native IPC schema rejects unsupported
+rates; older direct IPC requests without the field retain a 192 kbps fallback.
+
+Windows CI creates original synthetic audio and runs the actual FFmpeg export
+with 128 and 320 kbps settings. FFprobe verifies MP3 codec, nonzero duration,
+and encoded stream bitrate. Source tests verify every editor operation's
+arguments, all four supported bitrates, and fallback behavior.
+
+For physical Windows acceptance, encode the same source at 128 and 320 kbps
+using the app's export selector, inspect both outputs in an audio metadata tool,
+and listen for encoder clipping or channel issues. **Lossless Stream-Copy**
+preserves the source bitstream; a selected MP3 bitrate cannot change the
+bitrate without transcoding. Disable stream-copy to apply MP3 encoding settings.
+
+These checks cover editor FFmpeg exports, not model-worker-generated stems,
+which follow a separate inference/export protocol.

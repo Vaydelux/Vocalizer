@@ -69,8 +69,8 @@ export function ExportFormatSelect({
       </div>
       <p className="mt-1.5 text-[11px] text-muted-foreground">
         {value.format === "mp3"
-          ? "MP3 encoded locally with lamejs (no upload)."
-          : "Lossless PCM WAV. Compressed encoders arrive with the desktop FFmpeg pipeline."}
+          ? "MP3 is encoded locally using FFmpeg on desktop or lamejs in the web preview. No upload."
+          : "Lossless PCM WAV encoded locally, using FFmpeg on desktop or Web Audio in the preview."}
       </p>
     </div>
   );
