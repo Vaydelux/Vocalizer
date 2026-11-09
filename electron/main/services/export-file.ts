@@ -10,12 +10,13 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { randomUUID } from "node:crypto";
+import { STREAM_COPY_EXTENSIONS } from "../../shared/stream-copy";
 
 export function createStagedOutput(destination: string): string {
   if (!path.isAbsolute(destination)) throw new Error("Output must be an absolute path.");
   const directory = path.dirname(destination);
   const ext = path.extname(destination).toLowerCase();
-  if (![".wav", ".flac", ".mp3"].includes(ext)) {
+  if (!STREAM_COPY_EXTENSIONS.some((allowed) => ext === `.${allowed}`)) {
     throw new Error("Output must have a supported audio extension.");
   }
   fs.mkdirSync(directory, { recursive: true });
