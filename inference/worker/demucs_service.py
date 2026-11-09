@@ -14,6 +14,7 @@ import shutil
 from audio_validation import probe
 from demucs_streaming import MAX_LONG_INPUT_SECONDS, render_streaming_stems
 from errors import WorkerError
+from audio_encoding_options import require_mp3_bitrate
 from local_model import DEMUCS_SIGNATURE, require_local_demucs_model
 
 FOUR_STEMS = ("Vocals", "Drums", "Bass", "Other")
@@ -27,8 +28,9 @@ PROFILES = {
 def separate_demucs(
     model_id: str, model_path: str, input_path: str, output_dir: str,
     requested_stems: list[str], output_format: str, device: str,
-    profile: str, on_progress,
+    profile: str, on_progress, mp3_bitrate: int = 320,
 ) -> tuple[list[dict[str, Any]], str, str, bool]:
+    mp3_bitrate = require_mp3_bitrate(mp3_bitrate)
     if device not in ("cpu", "auto"):
         raise WorkerError("device-unsupported", "Only CPU is supported in this Demucs build.")
     if len(requested_stems) != 4 or set(requested_stems) != set(FOUR_STEMS):
@@ -91,6 +93,7 @@ def separate_demucs(
             input_duration=input_duration,
             on_progress=on_progress,
             chunk_seconds=8 if profile == "low-memory" else 24,
+            mp3_bitrate=mp3_bitrate,
         )
     except WorkerError:
         raise
