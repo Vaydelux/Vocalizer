@@ -39,6 +39,7 @@ function buildTrim(op: Extract<FfmpegOp, { kind: "trim" }>): BuiltCommand {
         "-ss", op.startSec.toFixed(6),
         "-i", op.inputPath,
         "-t", duration.toFixed(6),
+        "-map", "0:a:0",
         "-vn",
         "-c:a", "copy",
         op.outputPath,
