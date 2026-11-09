@@ -12,7 +12,7 @@
  * `tasks.ts`.
  */
 
-import type { JobCtx, JobResultFile, ExportFormat, Mp3Bitrate } from "./types";
+import type { JobCtx, JobResultFile, ExportFormat } from "./types";
 import type { AudioTrack } from "./types";
 import type { FfmpegFormat, FfmpegOp } from "./ipc-contracts";
 import { native, isNative } from "./native";
