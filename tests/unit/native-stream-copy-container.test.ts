@@ -12,7 +12,6 @@ const pairs = [
   ["mp3", "mp3", "mp3"],
   ["wav", "pcm_s16le", "wav"],
   ["wav", "pcm_f32le", "wav"],
-  ["flac", "flac", "flac"],
   ["mov,mp4,m4a,3gp,3g2,mj2", "aac", "m4a"],
   ["mov,mp4,m4a,3gp,3g2,mj2", "alac", "m4a"],
   ["aac", "aac", "aac"],
@@ -49,6 +48,7 @@ describe("verified lossless Cutter output containers", () => {
 
   it("refuses a renamed file with an incompatible codec/container", () => {
     for (const meta of [
+      { format: "flac", codec: "flac" },
       { format: "wav", codec: "mp3" },
       { format: "mp3", codec: "pcm_s16le" },
       { format: "mov,mp4,m4a,3gp,3g2,mj2", codec: "h264" },
