@@ -113,3 +113,20 @@ Do not label this as a public production or fully offline-AI release until
 the model redistribution review and the real Windows acceptance items have
 passed. Source CI, an EXE artifact, and a successful startup probe are necessary
 but not sufficient.
+
+## Browser/renderer export safety
+
+Run the source unit tests for WAV size/layout preflight and MP3 multichannel
+downmix as part of the PR validation suite. The in-memory browser WAV encoder
+rejects payloads exceeding 128 MiB, invalid layouts and empty output **before**
+allocating encoded memory; larger desktop exports should use native FFmpeg
+streaming rather than silently wrapping RIFF chunk lengths.
+
+For manual playback QA, inspect a short mono, stereo and 3+-channel sample
+after MP3 export. Additional channels are **averaged** into the secondary
+channel; this prevents 16-bit overflow but does not reproduce a standard
+surround-speaker matrix. Verify there is no crackling caused by integer
+wraparound and compare levels against the original source.
+
+A green source test proves header sizes and PCM arithmetic, not perceptual
+quality, codec compatibility or stability on low-memory Windows systems.
