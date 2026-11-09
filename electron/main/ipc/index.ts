@@ -246,7 +246,9 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
   ipcMain.handle(IPC.FFPROBE_METADATA, async (event, raw) => {
     assertSender(event);
     const req = ffprobeRequestSchema.parse(raw);
-    return probeFile(req.path);
+    // Stem-backed tracks carry an opaque token, never a renderer-visible path.
+    // Resolve only registered completed stems before letting FFprobe inspect it.
+    return probeFile(await resolveNativeAudioInput(req.path));
   });
 
   /* ---------------------------- recorded audio ----------------------------- */

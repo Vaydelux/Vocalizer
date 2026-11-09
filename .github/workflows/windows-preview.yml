@@ -161,6 +161,11 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "The selected FFprobe binary failed validation" }
           Get-FileHash resources/binaries/ffmpeg.exe -Algorithm SHA256 | Format-List
           Get-FileHash resources/binaries/ffprobe.exe -Algorithm SHA256 | Format-List
+      - name: Verify lossless Cutter audio containers and codec preservation
+        shell: pwsh
+        run: |
+          bun scripts/smoke-lossless-cutter.ts resources/binaries/ffmpeg.exe resources/binaries/ffprobe.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Verify real FFmpeg MP3 bitrate encoding
         shell: pwsh
         run: |

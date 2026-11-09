@@ -6,7 +6,7 @@
  * Non-destructive: the source file is never modified; exports are new files.
  */
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Redo2, Scissors, SquareSplitHorizontal, Trash2, Undo2 } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/studio/page-header";
@@ -25,6 +25,12 @@ import { useUi } from "@/lib/studio/store-ui";
 import { useJobs } from "@/lib/studio/store-jobs";
 import { makeTrimTask } from "@/lib/studio/tasks";
 import { formatTimeMs } from "@/lib/studio/format";
+import { isNative } from "@/lib/studio/native";
+
+// Preload initializes before the renderer; no asynchronous subscription
+// is required. Stable function identities avoid repeated resubscription.
+function subscribeNativeAvailability(): () => void { return () => {}; }
+function getServerNativeAvailability(): boolean { return false; }
 
 export function CutterView() {
   const preselected = useUi((s) => s.preselectedTrackId);
@@ -41,6 +47,13 @@ export function CutterView() {
   const [endText, setEndText] = useState("");
   const [fmt, setFmt] = useState<ExportFormatValue>(useExportFormatDefault());
   const [lossless, setLossless] = useState(false);
+  // The server snapshot stays false during hydration. The real Electron
+  // bridge is already available in the desktop client before its first render.
+  const desktopAvailable = useSyncExternalStore(
+    subscribeNativeAvailability,
+    isNative,
+    getServerNativeAvailability,
+  );
   const [loudnorm, setLoudnorm] = useState(false);
 
   // Undo/redo of region edit instructions.
@@ -244,12 +257,13 @@ export function CutterView() {
                         Lossless Stream-Copy
                       </Label>
                       <p className="text-[11px] text-muted-foreground">
-                        Instant cut without re-encoding. Bit-for-bit identical audio quality.
+                        Desktop only. Copies original encoded audio frames without re-encoding; cut positions may align to codec frames.
                       </p>
                     </div>
                     <Switch
                       id="lossless-switch"
                       checked={lossless}
+                      disabled={!desktopAvailable}
                       onCheckedChange={(c) => {
                         setLossless(c);
                         if (c) setLoudnorm(false);
@@ -282,7 +296,7 @@ export function CutterView() {
                   <ExportFormatSelect value={fmt} onChange={setFmt} />
                 ) : (
                   <p className="text-xs text-muted-foreground italic">
-                    Output format matches source container (stream copied).
+                    The output container is determined from verified source audio, not MP3/WAV settings. Unsupported codecs require re-encoding.
                   </p>
                 )}
                 <div className="flex flex-wrap items-center gap-2">

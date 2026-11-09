@@ -189,3 +189,38 @@ bitrate without transcoding. Disable stream-copy to apply MP3 encoding settings.
 
 These checks cover editor FFmpeg exports, not model-worker-generated stems,
 which follow a separate inference/export protocol.
+
+## Native Cutter: verified lossless stream-copy containers
+
+Cutter's **Lossless Stream-Copy** is available only in Electron. In a web
+preview it must be disabled and a direct web task must reject lossless mode,
+rather than silently decoding and re-encoding.
+
+The desktop worker probes the actual audio codec and container before showing
+the save dialog. It selects the matching verified extension instead of using
+the separate MP3/WAV export preference. Supported copy-safe pairs include
+MP3; PCM WAV; AAC/ALAC M4A; ADTS AAC; Ogg Vorbis/Opus; WebM Opus/Vorbis;
+PCM AIFF; and WMA. Unknown, mismatched or incompatible codec/container pairs
+must fail with an actionable re-encode suggestion.
+FLAC copy-cuts are deliberately unsupported: FFmpeg may preserve the original
+STREAMINFO total-samples value, causing a shortened FLAC to report the full
+input duration. For a precision cut of a FLAC source, disable stream-copy and
+export 24-bit PCM WAV (lossless decoding/re-encoding). A renamed file is not proof
+of its codec or container.
+
+Native main repeats the FFprobe check before opening a staged file, rejects a
+mismatched output extension or any stream-copy + loudness-normalize request,
+and verifies the resulting codec remains identical to the input before
+publishing. Cancellation during preflight must prevent the FFmpeg process
+from launching. Never overwrite an existing user output file.
+
+Windows CI generates original test tones and verifies real MP3/WAV/FLAC/M4A/
+Ogg stream-copy trims, FFprobe codec identity, sensible duration and staged
+publication. It also tests extension-spoofing rejection.
+
+Physical-device QA: try MP3, WAV, FLAC, AAC/M4A and Ogg as well as one
+unsupported codec. Check the file extension, playback, metadata, small-region
+cut timing, input immutability, cancellation, and a destination that already
+exists. Audio stream-copy preserves codec frames but is **not guaranteed
+sample-accurate** around compressed packet/frame boundaries. Use re-encoding
+for precise positioning or DSP effects such as loudness normalization.
