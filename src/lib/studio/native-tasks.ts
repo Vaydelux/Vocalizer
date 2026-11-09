@@ -22,6 +22,7 @@ import { studioError } from "./errors";
 import { planJoinTimeline } from "../../../electron/shared/join-timeline";
 import { resolveNativeExportSettings, type NativeExportOverride } from "./native-export-settings";
 import { useSettings } from "./store-settings";
+import { resolveStreamCopyContainer, type StreamCopyContainer } from "../../../electron/shared/stream-copy";
 
 /** Resolve the real disk path of a renderer File selection via the Electron
  *  webUtils API exposed on window.studio (the deprecated File.path is avoided). */
@@ -62,15 +63,21 @@ function extFor(format: ExportFormat): string {
 
 
 /** Ask the user for a real save path; throws CANCELLED if they back out. */
-async function chooseOutputPath(defaultName: string, format: ExportFormat): Promise<string> {
+async function chooseOutputPath(
+  defaultName: string,
+  format: ExportFormat | StreamCopyContainer,
+): Promise<string> {
   const api = native();
   if (!api) throw studioError("CAPABILITY_UNAVAILABLE", "Native API unavailable (web preview).");
-  const ext = extFor(format);
+  const ext = typeof format === "string" ? extFor(format) : format.extension;
   const chosen = await api.saveFile({
     defaultName: `${sanitizeFileName(baseName(defaultName))}_${timestampSlug()}.${ext}`,
     filters: [{ name: ext.toUpperCase(), extensions: [ext] }],
   });
   if (!chosen) throw studioError("CANCELLED", "Save dialog cancelled — no output written.");
+  if (chosen.split(/[\\/]/).pop()?.toLowerCase().endsWith(`.${ext}`) !== true) {
+    throw studioError("INPUT_INVALID", `Choose a .${ext} filename to preserve the verified audio container.`);
+  }
   return chosen;
 }
 
@@ -129,12 +136,30 @@ export async function nativeTrimTask(
   const { format: fmt, mp3Bitrate } = resolveNativeExportSettings(
     input.override, useSettings.getState(),
   );
-  const outputPath = await chooseOutputPath(input.track.name, fmt);
-  ctx.log(`FFmpeg trim ${input.track.name} → ${outputPath}${input.lossless ? " [lossless copy]" : ""}`);
+  const sourcePath = trackSourcePath(input.track);
+  let copyFormat: StreamCopyContainer | null = null;
+  if (input.lossless) {
+    if (input.loudnessNormalize) {
+      throw studioError("INPUT_INVALID", "Lossless copy cannot also normalize loudness.");
+    }
+    const api = native();
+    if (!api) throw studioError("CAPABILITY_UNAVAILABLE", "Lossless copying requires the desktop app.");
+    const verifiedSource = await api.probeMetadata({ path: sourcePath });
+    copyFormat = resolveStreamCopyContainer(verifiedSource);
+    if (!copyFormat) {
+      throw studioError(
+        "UNSUPPORTED_MEDIA",
+        "Source codec/container cannot be copied safely. Disable Lossless Stream-Copy to re-encode.",
+      );
+    }
+    if (ctx.signal.aborted) throw studioError("CANCELLED", "Trim cancelled during audio metadata checks.");
+  }
+  const outputPath = await chooseOutputPath(input.track.name, copyFormat ?? fmt);
+  ctx.log(`FFmpeg trim ${input.track.name} → ${outputPath}${copyFormat ? ` [verified ${copyFormat.label} stream-copy]` : ""}`);
   const op: FfmpegOp = {
     jobId: ctx.jobId,
     kind: "trim",
-    inputPath: trackSourcePath(input.track),
+    inputPath: sourcePath,
     startSec: input.startSec,
     endSec: input.endSec,
     lossless: input.lossless,
@@ -143,7 +168,8 @@ export async function nativeTrimTask(
     mp3Bitrate,
     outputPath,
   };
-  return await runAndWrap(op, ctx, outputPath);
+  const result = await runAndWrap(op, ctx, outputPath);
+  return copyFormat ? { ...result, mime: copyFormat.mime } : result;
 }
 
 export async function nativeJoinTask(
