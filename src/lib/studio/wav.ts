@@ -7,6 +7,34 @@ import { studioError } from "./errors";
 
 export type WavBitDepth = 16 | 24;
 
+/**
+ * Browser exports keep the complete encoded buffer in memory alongside
+ * decoded audio. Larger exports must use desktop FFmpeg streaming instead.
+ */
+export const MAX_BROWSER_WAV_BYTES = 128 * 1024 * 1024;
+
+function wavLayout(channels: number, frames: number, sampleRate: number, bitDepth: WavBitDepth) {
+  if (!Number.isSafeInteger(channels) || channels < 1 || channels > 32 ||
+      !Number.isSafeInteger(sampleRate) || sampleRate <= 0 ||
+      (bitDepth !== 16 && bitDepth !== 24)) {
+    throw studioError("INPUT_INVALID", "Invalid WAV channel count, sample rate or bit depth.");
+  }
+  if (!Number.isSafeInteger(frames) || frames <= 0) {
+    throw studioError("OUTPUT_EMPTY", "Cannot export WAV audio without samples.");
+  }
+  const blockAlign = channels * (bitDepth / 8);
+  const dataSize = frames * blockAlign;
+  const totalSize = 44 + dataSize;
+  // Standard RIFF/WAVE has 32-bit chunk lengths; it cannot represent
+  // larger outputs even on a machine with enough free memory.
+  if (!Number.isSafeInteger(totalSize) || totalSize > MAX_BROWSER_WAV_BYTES ||
+      dataSize > 0xffffffff || totalSize - 8 > 0xffffffff) {
+    throw studioError("FILE_TOO_LARGE",
+      "WAV export is too large for safe browser encoding. Use the desktop FFmpeg export.");
+  }
+  return { blockAlign, dataSize, totalSize };
+}
+
 export interface EncodeWavOptions {
   bitDepth: WavBitDepth;
   signal: AbortSignal;
@@ -28,11 +56,9 @@ export async function encodeWav(buffer: AudioBuffer, opts: EncodeWavOptions): Pr
   const numChannels = buffer.numberOfChannels;
   const sampleRate = buffer.sampleRate;
   const numFrames = buffer.length;
-  const bytesPerSample = bitDepth / 8;
-  const blockAlign = numChannels * bytesPerSample;
-  const dataSize = numFrames * blockAlign;
+  if (signal.aborted) throw new DOMException("Aborted", "AbortError");
+  const { blockAlign, dataSize, totalSize } = wavLayout(numChannels, numFrames, sampleRate, bitDepth);
   const headerSize = 44;
-  const totalSize = headerSize + dataSize;
 
   const arrayBuffer = new ArrayBuffer(totalSize);
   const view = new DataView(arrayBuffer);
@@ -96,12 +122,13 @@ export async function encodeWavFromChannels(
   sampleRate: number,
   opts: EncodeWavOptions
 ): Promise<Blob> {
+  if (opts.signal.aborted) throw new DOMException("Aborted", "AbortError");
   const length = channels[0]?.length ?? 0;
   const numChannels = channels.length;
-  const bytesPerSample = opts.bitDepth / 8;
-  const blockAlign = numChannels * bytesPerSample;
-  const dataSize = length * blockAlign;
-  const totalSize = 44 + dataSize;
+  if (channels.some((channel) => channel.length !== length)) {
+    throw studioError("INPUT_INVALID", "WAV channel arrays must have equal sample lengths.");
+  }
+  const { blockAlign, dataSize, totalSize } = wavLayout(numChannels, length, sampleRate, opts.bitDepth);
   const arrayBuffer = new ArrayBuffer(totalSize);
   const view = new DataView(arrayBuffer);
   writeString(view, 0, "RIFF");
