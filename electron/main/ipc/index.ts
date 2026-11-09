@@ -392,6 +392,7 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
         outputDir: scratch,
         requestedStems: req.requestedStems as string[],
         outputFormat: req.outputFormat,
+        mp3Bitrate: req.mp3Bitrate,
         device: req.device,
         profile: req.profile,
         onProgress: (p) => {
