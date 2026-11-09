@@ -17,6 +17,7 @@ import { studioError, toStudioError } from "./errors";
 import { resolveModelForOperation } from "./registry";
 import { useModels } from "./store-models";
 import { baseName, sanitizeFileName, timestampSlug } from "./format";
+import { useSettings } from "./store-settings";
 
 export interface SeparationRequest {
   track: AudioTrack;
@@ -100,6 +101,7 @@ export function makeInferenceTask(req: SeparationRequest): JobTask {
         outputDir,
         requestedStems: req.requestedStems,
         outputFormat: fmt,
+        mp3Bitrate: req.mp3Bitrate ?? useSettings.getState().mp3Bitrate,
         device: req.device,
         profile: req.profile ?? "balanced",
       });
