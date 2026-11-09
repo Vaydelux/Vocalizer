@@ -12,6 +12,8 @@ export type FfmpegFormat = "wav" | "wav24" | "mp3" | "flac";
 export interface FfmpegOp {
   jobId: string;
   outputFormat: FfmpegFormat;
+  /** Legacy clients may omit; native IPC uses 192 kbps only as fallback. */
+  mp3Bitrate?: 128 | 192 | 256 | 320;
   outputPath: string;
   kind: "trim" | "join" | "pitch" | "convert" | "mix" | "multitrack";
   // trim / pitch / convert
