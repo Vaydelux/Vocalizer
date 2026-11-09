@@ -65,7 +65,7 @@ try {
     { name: "mp3", codec: "libmp3lame", expected: "mp3" },
     { name: "flac", codec: "flac", expected: "flac" },
     { name: "m4a", codec: "aac", expected: "m4a" },
-    { name: "ogg", codec: "vorbis", expected: "ogg" },
+    { name: "ogg", codec: "libvorbis", expected: "ogg" },
   ];
   for (const item of formats) {
     const input = join(folder, `source.${item.name}`);
