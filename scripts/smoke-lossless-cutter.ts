@@ -63,7 +63,6 @@ try {
   const formats = [
     { name: "wav", codec: "pcm_s16le", expected: "wav" },
     { name: "mp3", codec: "libmp3lame", expected: "mp3" },
-    { name: "flac", codec: "flac", expected: "flac" },
     { name: "m4a", codec: "aac", expected: "m4a" },
     { name: "ogg", codec: "libvorbis", expected: "ogg" },
   ];
@@ -109,6 +108,30 @@ try {
     }
     process.stdout.write(`Verified stream-copy .${container.extension}: ${meta.codec}, ${statSync(target).size} bytes\n`);
   }
+
+  // FLAC's original total-samples STREAMINFO metadata can survive a
+  // packet-copy trim, reporting the full source duration. The Cutter must
+  // explicitly reject it rather than returning a misleading "lossless" cut.
+  const flacSource = join(folder, "original.flac");
+  run(ffmpeg, [
+    "-hide_banner", "-loglevel", "error", "-nostdin", "-n",
+    "-i", original, "-vn", "-c:a", "flac", flacSource,
+  ]);
+  const flacMeta = probe(ffprobe, flacSource);
+  if (resolveStreamCopyContainer(flacMeta) !== null) {
+    throw new Error("FLAC stream-copy falsely advertised as a reliable time-range cut.");
+  }
+  const flacAsWav = join(folder, "flac-transcoded-lossless.wav");
+  run(ffmpeg, [
+    "-hide_banner", "-loglevel", "error", "-nostdin", "-n",
+    "-ss", "0.5", "-i", flacSource, "-t", "1.25",
+    "-map", "0:a:0", "-vn", "-c:a", "pcm_s24le", flacAsWav,
+  ]);
+  const wavMeta = probe(ffprobe, flacAsWav);
+  if (wavMeta.codec !== "pcm_s24le" || Math.abs(wavMeta.duration - 1.25) > 0.06) {
+    throw new Error("FLAC → lossless WAV fallback did not preserve time range.");
+  }
+  process.stdout.write("Verified FLAC stream-copy rejection and lossless WAV alternative\\n");
 
   // A misleading extension must not be selected from the file's name.
   const spoofed = join(folder, "renamed-wav.mp3");
