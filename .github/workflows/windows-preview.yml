@@ -161,6 +161,11 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "The selected FFprobe binary failed validation" }
           Get-FileHash resources/binaries/ffmpeg.exe -Algorithm SHA256 | Format-List
           Get-FileHash resources/binaries/ffprobe.exe -Algorithm SHA256 | Format-List
+      - name: Verify real FFmpeg Joiner concat and crossfade
+        shell: pwsh
+        run: |
+          bun scripts/smoke-join-ffmpeg.ts resources/binaries/ffmpeg.exe resources/binaries/ffprobe.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Verify actual offline HTDemucs four-stem inference on Windows
         if: ${{ github.event_name == 'pull_request' }}
         shell: pwsh
