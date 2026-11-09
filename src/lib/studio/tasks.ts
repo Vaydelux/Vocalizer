@@ -96,6 +96,12 @@ export function makeTrimTask(input: TrimTaskInput) {
     );
   }
   return async (ctx: JobCtx): Promise<JobResultFile> => {
+    if (input.lossless) {
+      throw studioError(
+        "CAPABILITY_UNAVAILABLE",
+        "Bitstream lossless-copy requires the desktop FFmpeg engine; turn it off to re-encode in the web preview.",
+      );
+    }
     const { track, startSec, endSec } = input;
     ctx.log(`Decoding ${track.name}…`);
     const { buffer } = await decodeFile(track.file, ctx.signal);
