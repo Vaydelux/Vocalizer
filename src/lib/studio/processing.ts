@@ -10,6 +10,7 @@
  */
 
 import { studioError } from "./errors";
+import { planJoinTimeline } from "../../../electron/shared/join-timeline";
 
 function checkAbort(signal?: AbortSignal): void {
   if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
@@ -78,48 +79,53 @@ export async function renderJoin(items: JoinItem[], opts: JoinOptions): Promise<
   }
   checkAbort(signal);
 
-  // Compute timeline in output samples.
-  let cursor = 0;
-  const starts: number[] = [];
-  for (const item of items) {
-    const len = Math.ceil((item.buffer.length * targetSampleRate) / item.buffer.sampleRate);
-    starts.push(cursor);
-    if (cursor === 0 && starts.length === 1) {
-      cursor = len;
-    } else {
-      const xf = Math.min(crossfadeSec * targetSampleRate, len - 1, cursor);
-      cursor = cursor - (xf > 0 ? xf : 0) + len;
-    }
+  if (!Number.isSafeInteger(targetSampleRate) || targetSampleRate <= 0 ||
+      !Number.isFinite(crossfadeSec) || crossfadeSec < 0 ||
+      (targetChannels !== 1 && targetChannels !== 2)) {
+    throw studioError("INPUT_INVALID", "Invalid join sample rate, channel layout or crossfade.");
   }
-  const totalLength = Math.max(1, Math.ceil(cursor));
+
+  const lengths = items.map((item) =>
+    Math.ceil(item.buffer.length * targetSampleRate / item.buffer.sampleRate));
+  let timeline: ReturnType<typeof planJoinTimeline>;
+  try {
+    timeline = planJoinTimeline(lengths, Math.round(crossfadeSec * targetSampleRate));
+  } catch (error) {
+    throw studioError("INPUT_INVALID", error instanceof Error ? error.message : "Invalid join timeline.");
+  }
+  const { startFrames, overlapFrames, totalFrames } = timeline;
   onStage?.(`Rendering join (${items.length} items)`, null);
 
-  const ctx = new OfflineAudioContext(targetChannels, totalLength, targetSampleRate);
+  const ctx = new OfflineAudioContext(targetChannels, totalFrames, targetSampleRate);
+  const CURVE_POINTS = 64;
   for (let i = 0; i < items.length; i++) {
+    checkAbort(signal);
     const item = items[i];
     const src = ctx.createBufferSource();
     src.buffer = item.buffer;
     const gain = ctx.createGain();
     const g = item.gain ?? 1;
+    if (!Number.isFinite(g) || g < 0 || g > 1) {
+      throw studioError("INPUT_INVALID", "Join item gain must be between zero and one.");
+    }
     gain.gain.value = g;
     src.connect(gain).connect(ctx.destination);
 
-    const startAt = starts[i];
-    const xfSamples =
-      i === 0 || crossfadeSec <= 0
-        ? 0
-        : Math.min(crossfadeSec * targetSampleRate, startAt);
-    const xfSec = xfSamples / targetSampleRate;
-
-    if (xfSamples > 0) {
-      // Equal-power crossfade: fade-in over the overlap region.
-      gain.gain.setValueAtTime(0.0001, startAt / targetSampleRate);
-      gain.gain.exponentialRampToValueAtTime(Math.max(0.0002, g), (startAt + xfSamples) / targetSampleRate);
-      src.start(startAt / targetSampleRate);
-    } else {
-      src.start(startAt / targetSampleRate);
+    const start = startFrames[i] / targetSampleRate;
+    const fadeInFrames = i === 0 ? 0 : overlapFrames[i - 1];
+    const fadeOutFrames = i === items.length - 1 ? 0 : overlapFrames[i];
+    if (fadeInFrames > 0) {
+      const curve = Float32Array.from({ length: CURVE_POINTS }, (_, j) =>
+        g * Math.sin((Math.PI / 2) * j / (CURVE_POINTS - 1)));
+      gain.gain.setValueCurveAtTime(curve, start, fadeInFrames / targetSampleRate);
     }
-    void xfSec;
+    if (fadeOutFrames > 0) {
+      const fadeOutStart = (startFrames[i] + lengths[i] - fadeOutFrames) / targetSampleRate;
+      const curve = Float32Array.from({ length: CURVE_POINTS }, (_, j) =>
+        g * Math.cos((Math.PI / 2) * j / (CURVE_POINTS - 1)));
+      gain.gain.setValueCurveAtTime(curve, fadeOutStart, fadeOutFrames / targetSampleRate);
+    }
+    src.start(start);
   }
   return await renderOffline(ctx);
 }
