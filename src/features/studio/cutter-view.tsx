@@ -6,7 +6,7 @@
  * Non-destructive: the source file is never modified; exports are new files.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Redo2, Scissors, SquareSplitHorizontal, Trash2, Undo2 } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/studio/page-header";
@@ -27,6 +27,11 @@ import { makeTrimTask } from "@/lib/studio/tasks";
 import { formatTimeMs } from "@/lib/studio/format";
 import { isNative } from "@/lib/studio/native";
 
+// Preload initializes before the renderer; no asynchronous subscription
+// is required. Stable function identities avoid repeated resubscription.
+function subscribeNativeAvailability(): () => void { return () => {}; }
+function getServerNativeAvailability(): boolean { return false; }
+
 export function CutterView() {
   const preselected = useUi((s) => s.preselectedTrackId);
   const jobsEnqueue = useJobs((s) => s.enqueue);
@@ -42,10 +47,13 @@ export function CutterView() {
   const [endText, setEndText] = useState("");
   const [fmt, setFmt] = useState<ExportFormatValue>(useExportFormatDefault());
   const [lossless, setLossless] = useState(false);
-  // Defer Electron bridge detection until after hydration so the disabled
-  // state is stable across Next's prerender and the desktop renderer.
-  const [desktopAvailable, setDesktopAvailable] = useState(false);
-  useEffect(() => setDesktopAvailable(isNative()), []);
+  // The server snapshot stays false during hydration. The real Electron
+  // bridge is already available in the desktop client before its first render.
+  const desktopAvailable = useSyncExternalStore(
+    subscribeNativeAvailability,
+    isNative,
+    getServerNativeAvailability,
+  );
   const [loudnorm, setLoudnorm] = useState(false);
 
   // Undo/redo of region edit instructions.
