@@ -244,3 +244,25 @@ alone. The cache remains entirely optional: an invalid, unavailable, full or
 read-only cache directory must not affect the native audio player's ability
 to stream or process verified stems. Automated tests exercise large-directory
 quota planning, stale temporary file recovery and invalid cache destinations.
+
+
+## Native waveform cancellation ownership
+
+A waveform player now assigns a **fresh UUID request ID** each time a verified
+stem opens. Generation and cancellation IPC must carry the exact job ID, stem
+and request ID. When a user rapidly closes/reopens a project, an old player's
+delayed cleanup can no longer cancel its replacement simply because both
+renderers refer to the same stem.
+
+Main registers requests **before** awaiting registry lookup, allowing an
+early cancellation to stop work even if file authorization is slow. A newer
+request supersedes the previous operation, while a cancelled task cannot
+publish a stale waveform. Completed waveform reuse remains protected by
+source identity validation and the existing cache checksum.
+
+Linux source tests check same-stem stale cancellation, cross-stem isolation,
+request ID schema validation and rejection of legacy cancellation without an
+ID. The Windows packaged Chromium smoke intentionally sends a stale cancel
+while a second waveform request is pending and verifies the newer cache hit
+still succeeds. This is a race-hardening gate, not a substitute for manual
+rapid-switch testing on physical Windows hardware.

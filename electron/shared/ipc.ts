@@ -206,6 +206,12 @@ export const revealInferenceStemSchema = z.object({
   jobId: z.string().min(1).max(80),
   stem: z.enum(["Vocals", "Instrumental", "Drums", "Bass", "Guitar", "Piano", "Other"]),
 });
+
+/** Strict per-invocation identity prevents delayed cleanup from cancelling a
+ * newer waveform request for the same stem. */
+export const inferenceWaveformRequestSchema = revealInferenceStemSchema.extend({
+  requestId: z.string().uuid(),
+});
 /** User-approved native file picker for relinking published stems.
  * Only known published filenames, exact bytes and probed duration can match.
  * No path from project JSON is ever passed to main. */
@@ -337,8 +343,8 @@ export interface StudioNativeApi {
   revealInferenceStem(req: { jobId: string; stem: InferenceStemResult["stem"] }): Promise<{ revealed: boolean }>;
   /** Privileged FFprobe, only for completed and still registered stem outputs. */
   probeInferenceStem(req: { jobId: string; stem: InferenceStemResult["stem"] }): Promise<NativeAudioMeta>;
-  generateInferenceWaveform(req: { jobId: string; stem: InferenceStemResult["stem"] }): Promise<NativeWaveformResult>;
-  cancelInferenceWaveform(req: { jobId: string; stem: InferenceStemResult["stem"] }): Promise<{ cancelled: boolean }>;
+  generateInferenceWaveform(req: { jobId: string; stem: InferenceStemResult["stem"]; requestId: string }): Promise<NativeWaveformResult>;
+  cancelInferenceWaveform(req: { jobId: string; stem: InferenceStemResult["stem"]; requestId: string }): Promise<{ cancelled: boolean }>;
   relinkInferenceStems(req: NativeStemRelinkRequest): Promise<NativeStemRelinkResponse>;
   onInferenceProgress(cb: (p: InferenceProgress) => void): () => void;
   getSettings(): Promise<NativeSettings>;

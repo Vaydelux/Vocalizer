@@ -20,6 +20,7 @@ import {
   cancelRequestSchema,
   recordingStageSchema,
   revealInferenceStemSchema,
+  inferenceWaveformRequestSchema,
   nativeStemRelinkRequestSchema,
   resolvePathRequestSchema,
   nativeSettingsSchema,
@@ -29,6 +30,7 @@ import {
 } from "../../shared/ipc";
 import { probeFile } from "../services/ffprobe";
 import { generateNativeStemWaveform } from "../services/native-waveform";
+import { WaveformRequestCoordinator } from "../../shared/waveform-request";
 import { identifyNativeWaveformSource, nativeWaveformFingerprint, readNativeWaveformCache, writeNativeWaveformCache } from "../services/waveform-cache";
 import { parseNativeStemInput } from "../../shared/stem-input";
 import { parsePublishedStemFilename, doesRelinkedStemMatch } from "../../shared/published-stem";
@@ -474,28 +476,30 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
 
   // Only one decoder is allowed per main process to constrain background CPU
   // usage; starting a new track aborts an older waveform request.
-  let activeWaveform: {
-    key: string; controller: AbortController;
-  } | null = null;
-
+  const waveformRequests = new WaveformRequestCoordinator();
   ipcMain.handle(IPC.INFERENCE_STEM_WAVEFORM, async (event, raw) => {
     assertSender(event);
-    const req = revealInferenceStemSchema.parse(raw);
-    const approved = await resolveCompletedStemForPlayback(req.jobId, req.stem);
-    if (!approved) throw studioError("MISSING_FILE", "Verified audio stem is unavailable for waveform generation.");
-    const key = `${req.jobId}:${req.stem}`;
-    activeWaveform?.controller.abort();
-    const task = { key, controller: new AbortController() };
-    activeWaveform = task;
+    const req = inferenceWaveformRequestSchema.parse(raw);
+    // Register BEFORE async authorization so slow source lookups and
+    // outdated player cleanups cannot interfere with newer requests.
+    const task = waveformRequests.start(req);
     try {
+      const approved = await resolveCompletedStemForPlayback(req.jobId, req.stem);
+      if (task.controller.signal.aborted) throw studioError("CANCELLED", "Superseded waveform request.");
+      if (!approved) throw studioError("MISSING_FILE", "Verified audio stem is unavailable for waveform generation.");
       const source = await identifyNativeWaveformSource(approved);
+      if (task.controller.signal.aborted) throw studioError("CANCELLED");
       const storage = path.join(cacheDir(), "native-waveforms-v1");
       const cached = await readNativeWaveformCache(storage, source);
       if (task.controller.signal.aborted) throw studioError("CANCELLED");
       if (cached) {
         const current = await identifyNativeWaveformSource(approved);
+        const registered = await resolveCompletedStemForPlayback(req.jobId, req.stem);
+        // A cached result can only be returned by its still-active owner,
+        // even when cancellation occurs during the last filesystem awaits.
+        if (task.controller.signal.aborted) throw studioError("CANCELLED");
         if (nativeWaveformFingerprint(current).equals(nativeWaveformFingerprint(source)) &&
-            await resolveCompletedStemForPlayback(req.jobId, req.stem) === approved) {
+            registered === approved) {
           return { ...cached, cacheHit: true };
         }
         throw studioError("CANCELLED", "Native audio changed while reading cached peaks.");
@@ -511,6 +515,7 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
         throw studioError("CANCELLED", "This source changed while generating waveform peaks.");
       }
       const after = await identifyNativeWaveformSource(approved);
+      if (task.controller.signal.aborted) throw studioError("CANCELLED");
       if (!nativeWaveformFingerprint(source).equals(nativeWaveformFingerprint(after))) {
         throw studioError("CANCELLED", "Native audio was modified during waveform generation.");
       }
@@ -519,18 +524,17 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
       try {
         await writeNativeWaveformCache(storage, source, response);
       } catch { /* regeneration remains available on next project open */ }
+      if (task.controller.signal.aborted) throw studioError("CANCELLED");
       return { ...response, cacheHit: false };
     } finally {
-      if (activeWaveform === task) activeWaveform = null;
+      waveformRequests.finish(task);
     }
   });
 
   ipcMain.handle(IPC.INFERENCE_CANCEL_STEM_WAVEFORM, async (event, raw) => {
     assertSender(event);
-    const req = revealInferenceStemSchema.parse(raw);
-    if (activeWaveform?.key !== `${req.jobId}:${req.stem}`) return { cancelled: false };
-    activeWaveform.controller.abort();
-    return { cancelled: true };
+    const req = inferenceWaveformRequestSchema.parse(raw);
+    return { cancelled: waveformRequests.cancel(req) };
   });
 
   ipcMain.handle(IPC.INFERENCE_PROBE_STEM, async (event, raw) => {
