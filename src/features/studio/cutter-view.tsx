@@ -25,6 +25,7 @@ import { useUi } from "@/lib/studio/store-ui";
 import { useJobs } from "@/lib/studio/store-jobs";
 import { makeTrimTask } from "@/lib/studio/tasks";
 import { formatTimeMs } from "@/lib/studio/format";
+import { isNative } from "@/lib/studio/native";
 
 export function CutterView() {
   const preselected = useUi((s) => s.preselectedTrackId);
@@ -244,12 +245,13 @@ export function CutterView() {
                         Lossless Stream-Copy
                       </Label>
                       <p className="text-[11px] text-muted-foreground">
-                        Instant cut without re-encoding. Bit-for-bit identical audio quality.
+                        Desktop only. Copies original encoded audio frames without re-encoding; cut positions may align to codec frames.
                       </p>
                     </div>
                     <Switch
                       id="lossless-switch"
                       checked={lossless}
+                      disabled={!isNative()}
                       onCheckedChange={(c) => {
                         setLossless(c);
                         if (c) setLoudnorm(false);
@@ -282,7 +284,7 @@ export function CutterView() {
                   <ExportFormatSelect value={fmt} onChange={setFmt} />
                 ) : (
                   <p className="text-xs text-muted-foreground italic">
-                    Output format matches source container (stream copied).
+                    The output container is determined from verified source audio, not MP3/WAV settings. Unsupported codecs require re-encoding.
                   </p>
                 )}
                 <div className="flex flex-wrap items-center gap-2">
