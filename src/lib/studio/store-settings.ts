@@ -28,13 +28,13 @@ interface SettingsStore extends StudioSettings {
   reset: () => void;
 }
 
-function migrateSettings(persisted: unknown): SettingsJson {
-  const validated = validateSettingsJson(persisted);
-  if (validated) {
-    // Forward-fill any keys added by newer versions (e.g. mp3Bitrate).
-    return { ...DEFAULT_SETTINGS, ...validated } as SettingsJson;
-  }
-  return { ...DEFAULT_SETTINGS } as SettingsJson;
+/** Merge legacy versions with defaults BEFORE full schema validation. */
+export function migrateSettings(persisted: unknown): SettingsJson {
+  const candidate =
+    persisted !== null && typeof persisted === "object" && !Array.isArray(persisted)
+      ? { ...DEFAULT_SETTINGS, ...persisted }
+      : { ...DEFAULT_SETTINGS };
+  return validateSettingsJson(candidate) ?? { ...DEFAULT_SETTINGS };
 }
 
 export const useSettings = create<SettingsStore>()(
@@ -52,16 +52,11 @@ export const useSettings = create<SettingsStore>()(
       // Validate everything that comes back from storage.
       onRehydrateStorage: () => (state) => {
         if (!state) return;
-        const validated = validateSettingsJson({
-          theme: state.theme,
-          accent: state.accent,
-          exportFormat: state.exportFormat,
-          sampleRate: state.sampleRate,
-          concurrency: state.concurrency,
-          volume: state.volume,
-          preferredModelId: state.preferredModelId,
-          fallbackPolicy: state.fallbackPolicy,
-        });
+        // Validate the complete settings object. Explicitly rebuilding a
+        // partial object dropped mp3Bitrate, making *every* hydration fail
+        // and silently restoring all preferences to their defaults.
+        // Zod strips Zustand action functions and other unknown keys.
+        const validated = validateSettingsJson(state);
         if (!validated) {
           // Persisted state failed validation — restore defaults.
           useSettings.setState({ ...DEFAULT_SETTINGS });
