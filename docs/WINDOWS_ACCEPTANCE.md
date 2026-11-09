@@ -199,9 +199,13 @@ rather than silently decoding and re-encoding.
 The desktop worker probes the actual audio codec and container before showing
 the save dialog. It selects the matching verified extension instead of using
 the separate MP3/WAV export preference. Supported copy-safe pairs include
-MP3; PCM WAV; FLAC; AAC/ALAC M4A; ADTS AAC; Ogg Vorbis/Opus; WebM Opus/Vorbis;
+MP3; PCM WAV; AAC/ALAC M4A; ADTS AAC; Ogg Vorbis/Opus; WebM Opus/Vorbis;
 PCM AIFF; and WMA. Unknown, mismatched or incompatible codec/container pairs
-must fail with an actionable re-encode suggestion. A renamed file is not proof
+must fail with an actionable re-encode suggestion.
+FLAC copy-cuts are deliberately unsupported: FFmpeg may preserve the original
+STREAMINFO total-samples value, causing a shortened FLAC to report the full
+input duration. For a precision cut of a FLAC source, disable stream-copy and
+export 24-bit PCM WAV (lossless decoding/re-encoding). A renamed file is not proof
 of its codec or container.
 
 Native main repeats the FFprobe check before opening a staged file, rejects a
