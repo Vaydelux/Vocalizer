@@ -38,9 +38,10 @@ export function resolveStreamCopyContainer(
   if (has("wav") && codec.startsWith("pcm_")) {
     return { extension: "wav", mime: "audio/wav", label: "PCM WAV" };
   }
-  if (has("flac") && codec === "flac") {
-    return { extension: "flac", mime: "audio/flac", label: "FLAC" };
-  }
+  // FFmpeg stream-copying a trimmed FLAC can preserve the source's original
+  // STREAMINFO total-samples header. The output then reports the wrong length
+  // even if audio frames were trimmed. Require a regular lossless PCM re-encode
+  // instead of exposing this unreliable trim as a successful copy.
   if ((has("mov") || has("mp4") || has("m4a")) &&
       (codec === "aac" || codec === "alac")) {
     return { extension: "m4a", mime: "audio/mp4", label: "M4A" };
