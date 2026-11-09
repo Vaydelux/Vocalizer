@@ -66,4 +66,28 @@ describe("job output lifecycle", () => {
       revokeSpy.mockRestore();
     }
   });
+  it("rejects malformed byte counts and frees their object URLs", async () => {
+    const { useJobs } = await import("../../src/lib/studio/store-jobs");
+    const revoked: string[] = [];
+    const revokeSpy = spyOn(URL, "revokeObjectURL").mockImplementation((url) => {
+      revoked.push(url);
+    });
+    try {
+      const id = useJobs.getState().enqueue("export", "invalid-output", async () =>
+        output("blob:invalid-output", Number.NaN),
+      );
+      for (let i = 0; i < 20; i++) {
+        if (useJobs.getState().jobs.find((j) => j.id === id)?.state === "failed") break;
+        await Promise.resolve();
+      }
+      const job = useJobs.getState().jobs.find((j) => j.id === id);
+      expect(job?.state).toBe("failed");
+      expect(job?.error?.code).toBe("OUTPUT_EMPTY");
+      expect(job?.result).toBeNull();
+      expect(revoked).toEqual(["blob:invalid-output"]);
+      useJobs.getState().clearFinished();
+    } finally {
+      revokeSpy.mockRestore();
+    }
+  });
 });
