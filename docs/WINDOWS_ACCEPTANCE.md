@@ -66,6 +66,22 @@ Python, Node.js or FFmpeg dependency being silently used from the system PATH.
 11. Capture CPU time/memory and output durations on a representative real music
     fixture. Do not infer separation quality merely from nonidentical file hashes.
 
+## Audio preview volume/mute regression
+
+For a locally playable WAV or MP3, verify all of these interactions in Cutter:
+
+1. Set volume to 60%, mute, then raise the slider to 80%. The media must
+   become audible again; both the icon and underlying player should unmute.
+2. Set volume to zero, then click the mute control to unmute. Vocalizer
+   restores the last audible volume rather than staying silently at zero.
+3. Rapidly toggle mute twice. The slider should retain its previous volume,
+   and the audio element should end in its original unmuted state.
+4. Switch tracks after muting, then raise the volume. The new audio element
+   must use the same visible volume/mute state, not stale volume settings.
+
+Source CI includes deterministic volume-state tests. Actual audible output,
+Windows audio routing and hardware mixer behavior still require manual QA.
+
 ## Standalone Windows CPU inference verification (optional)
 
 From the repository checkout and the complete unpacked debug folder, with
