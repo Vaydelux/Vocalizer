@@ -42,14 +42,18 @@ def roformer_backend(profile: RoformerProfile) -> str:
     tensor loading fail. Do not retry with loose loading or silent weight
     remapping.
     """
-    msst_markers = {"mlp_expansion_factor", "use_torch_checkpoint", "skip_connection"}
-    if msst_markers.intersection(profile.model_kwargs):
-        return "msst"
-    # The original MSST BS model explicitly carries its linear stack setting,
-    # even when disabled. The generic upstream BS class does not.
-    if profile.architecture == "bs-roformer" and "linear_transformer_depth" in profile.model_kwargs:
-        return "msst"
-    return "upstream"
+    # The existing user model collection consists of MSST-exported weights,
+    # so select the MSST topology by default. The newer upstream architecture
+    # added residual streams and gated attention, and therefore must be chosen
+    # only when those explicit architecture options appear in the YAML.
+    upstream_markers = {
+        "num_residual_streams", "num_residual_fracs",
+        "mc_hyper_conn_sinkhorn_iters", "use_gated_xsa",
+        "add_value_residual", "linear_flash_attn",
+    }
+    if upstream_markers.intersection(profile.model_kwargs):
+        return "upstream"
+    return "msst"
 
 
 def model_init_kwargs(profile: RoformerProfile, model_class) -> dict:
