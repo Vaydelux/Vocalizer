@@ -27,6 +27,7 @@ datas = [
 datas += collect_data_files("onnxruntime")
 datas += collect_data_files("audio_separator")
 datas += collect_data_files("demucs")
+datas += collect_data_files("bs_roformer")
 
 binaries = []
 binaries += collect_dynamic_libs("onnxruntime")
@@ -49,6 +50,13 @@ hiddenimports = [
     "demucs.repo",
     "demucs.htdemucs",
     "demucs_service",
+    "roformer_model",
+    "roformer_service",
+    "bs_roformer",
+    "bs_roformer.bs_roformer",
+    "bs_roformer.mel_band_roformer",
+    "safetensors",
+    "safetensors.torch",
     "torchaudio",
     "yaml",
     "torch",
