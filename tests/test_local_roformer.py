@@ -83,7 +83,7 @@ class LocalRoformerTests(unittest.TestCase):
             class FakeMSSTModel:
                 def __init__(self, dim, depth, stereo, num_stems, freqs_per_bands,
                              mlp_expansion_factor=4, use_torch_checkpoint=False,
-                             skip_connection=False):
+                             skip_connection=False, multi_stft_resolutions_window_sizes=None):
                     pass
             params = model_init_kwargs(profile, FakeMSSTModel)
             self.assertEqual(params["mlp_expansion_factor"], 2)
