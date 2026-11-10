@@ -19,6 +19,7 @@ from audio_encoding_options import stem_codec_args
 from audio_validation import probe, verify_audio_file
 from errors import WorkerError
 from roformer_model import RoformerProfile, read_roformer_profile
+from stem_export_levels import shared_pcm_export_gain
 
 MAX_INPUT_SECONDS = 30.0
 MAX_INPUT_BYTES = 256 * 1024 * 1024
@@ -284,6 +285,15 @@ def separate_roformer(
     on_progress(None, "Running local RoFormer CPU inference")
     outputs = _render_windows(model, audio, profile, on_progress)
     del model
+    # Independent per-stem peak normalization destroys the relative volume
+    # of the vocal and instrumental tracks. A *single* attenuation applied to
+    # the whole stem group keeps the mix balance intact and protects integer
+    # PCM/MP3/FLAC encoders from clipping. In-range stems remain unchanged.
+    shared_gain = shared_pcm_export_gain(
+        float(np.max(np.abs(outputs[stem]))) for stem in profile.stems
+    )
+    if shared_gain < 1.0:
+        on_progress(None, "Applying common peak safety gain to preserve stem balance")
     destination = Path(output_dir)
     destination.mkdir(parents=True, exist_ok=True)
     suffix = "wav" if output_format in ("wav", "wav24") else output_format
@@ -297,8 +307,11 @@ def separate_roformer(
                 on_progress(0.85 + 0.14 * index / len(profile.stems), "Encoding and verifying RoFormer stems")
                 intermediate = Path(staging) / f"{index}.wav"
                 float_audio = outputs[stem]
-                peak = max(1.0, float(np.max(np.abs(float_audio))) / 0.999)
-                sf.write(str(intermediate), (float_audio / peak).T,
+                # Do NOT normalize tracks individually; share the exact same
+                # gain across every output, so later mixer playback keeps the
+                # original model-estimated stem ratios.
+                encoded_audio = float_audio * shared_gain if shared_gain < 1.0 else float_audio
+                sf.write(str(intermediate), encoded_audio.T,
                          profile.sample_rate, format="WAV", subtype="FLOAT")
                 argv = [
                     os.environ.get("LAS_FFMPEG_PATH", "ffmpeg"), "-hide_banner",
