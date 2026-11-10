@@ -32,6 +32,8 @@ export interface SeparationRequest {
   mp3Bitrate?: Mp3Bitrate;
   /** Explicit local model checkpoint selected by the user. Never fetched automatically. */
   localModelPath?: string;
+  /** Verified sibling YAML for an explicitly picked local RoFormer checkpoint. */
+  configPath?: string;
   profile?: "low-memory" | "balanced" | "thorough";
 }
 
@@ -96,6 +98,7 @@ export function makeInferenceTask(req: SeparationRequest): JobTask {
         jobId: ctx.jobId,
         modelId,
         modelPath,
+        configPath: req.configPath,
         architecture: arch,
         inputPath,
         outputDir,
