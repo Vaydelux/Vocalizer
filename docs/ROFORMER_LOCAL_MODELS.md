@@ -80,6 +80,16 @@ local/
   separation quality. Test those files locally before a public release.
 - FFmpeg decoding is capped before buffers are collected, limiting the
   preview to 30 seconds. This is not yet a full-song streaming release.
+- RoFormer now preserves **relative loudness across all generated stems**:
+  tracks already within the PCM peak ceiling are not changed. If any stem's
+  samples exceed the integer-audio output ceiling, every stem gets the same
+  attenuation rather than independent normalization. This protects the
+  vocal/instrumental balance in the mixer. It is peak safety, not dynamic
+  loudness mastering, volume enhancement, or a guarantee of perfect model
+  separation.
+- Windows CI verifies actual 24-bit PCM exports using original synthetic
+  signals with deliberately unequal peaks, including preserved stem-to-stem
+  ratio and no clipping after encoding.
 
 ## Troubleshooting
 
