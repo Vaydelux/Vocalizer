@@ -127,8 +127,19 @@ def _model_outputs(model, mixture, profile: RoformerProfile):
         raise WorkerError("inference-failed", "RoFormer returned an unsupported output structure.")
     result = result.detach().cpu().float().numpy()
     if len(profile.stems) == 2:
+        # Models trained with one target output a (batch, channels, frames)
+        # tensor and require subtraction to obtain the complementary signal.
+        # True two-output models carry a separate stem axis and must never
+        # be reduced to a fabricated difference track.
+        stems_count = profile.model_kwargs.get("num_stems", 1)
+        if stems_count == 2:
+            if result.ndim != 4 or result.shape[:3] != (1, 2, profile.channels):
+                raise WorkerError("inference-failed", f"Expected explicit two-stem RoFormer output, got {result.shape}.")
+            names = {"vocals": "Vocals", "instrumental": "Instrumental", "other": "Instrumental"}
+            return {names[name]: result[0, index]
+                    for index, name in enumerate(profile.instruments)}
         if result.ndim != 3 or result.shape[:2] != (1, profile.channels):
-            raise WorkerError("inference-failed", f"Unexpected two-stem RoFormer tensor shape: {result.shape}.")
+            raise WorkerError("inference-failed", f"Unexpected single-target RoFormer tensor shape: {result.shape}.")
         target = result[0]
         if profile.target == "vocals":
             return {"Vocals": target, "Instrumental": mixture - target}
