@@ -34,6 +34,24 @@ IGNORABLE_DEFAULTS = {
     "mlp_expansion_factor": 4,
 }
 
+def roformer_backend(profile: RoformerProfile) -> str:
+    """Select the architecture implementation from model semantics, not path.
+
+    MSST checkpoints use a distinct MaskEstimator topology and sometimes an
+    extra linear transformer module. Ignoring these options would make strict
+    tensor loading fail. Do not retry with loose loading or silent weight
+    remapping.
+    """
+    msst_markers = {"mlp_expansion_factor", "use_torch_checkpoint", "skip_connection"}
+    if msst_markers.intersection(profile.model_kwargs):
+        return "msst"
+    # The original MSST BS model explicitly carries its linear stack setting,
+    # even when disabled. The generic upstream BS class does not.
+    if profile.architecture == "bs-roformer" and "linear_transformer_depth" in profile.model_kwargs:
+        return "msst"
+    return "upstream"
+
+
 def model_init_kwargs(profile: RoformerProfile, model_class) -> dict:
     """Fail closed when required YAML parameters are absent from the loader."""
     accepted = set(inspect.signature(model_class.__init__).parameters) - {"self"}
@@ -54,6 +72,10 @@ def model_init_kwargs(profile: RoformerProfile, model_class) -> dict:
     # any actual parameter-shape mismatch instead of silently adapting weights.
     if "num_residual_streams" in accepted and "num_residual_streams" not in params:
         params["num_residual_streams"] = 1
+    # Some configs place sample_rate under audio only. MelBand filters depend
+    # on this value, so it must never silently use a mismatched 44100 default.
+    if "sample_rate" in accepted:
+        params.setdefault("sample_rate", profile.sample_rate)
     if params.get("flash_attn") is True:
         # No CUDA kernel is installed on the packaged CPU runtime.
         params["flash_attn"] = False
@@ -193,14 +215,20 @@ def separate_roformer(
         import numpy as np
         import soundfile as sf
         from safetensors.torch import load_file
-        from bs_roformer import BSRoformer, MelBandRoformer
+        from bs_roformer import BSRoformer as UpstreamBSRoformer, MelBandRoformer as UpstreamMelBandRoformer
+        from msst_roformer import BSRoformer as MSSTBSRoformer, MelBandRoformer as MSSTMelBandRoformer
     except ImportError as exc:
         raise WorkerError("architecture-unsupported", "RoFormer CPU inference dependencies are not bundled.") from exc
 
     torch.set_num_threads(max(1, min(4, os.cpu_count() or 1)))
-    cls = BSRoformer if architecture == "bs-roformer" else MelBandRoformer
+    backend = roformer_backend(profile)
+    if backend == "msst":
+        cls = MSSTBSRoformer if architecture == "bs-roformer" else MSSTMelBandRoformer
+    else:
+        cls = UpstreamBSRoformer if architecture == "bs-roformer" else UpstreamMelBandRoformer
+    on_progress(None, f"Validating local {backend.upper()} RoFormer architecture")
     params = model_init_kwargs(profile, cls)
-    on_progress(None, "Loading paired RoFormer safetensors")
+    on_progress(None, f"Loading {backend} RoFormer safetensors")
     try:
         model = cls(**params)
         state = load_file(model_path, device="cpu")
