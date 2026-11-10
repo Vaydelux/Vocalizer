@@ -51,7 +51,7 @@ def _read_yaml(path: Path) -> dict:
     SafeTupleLoader.add_constructor("tag:yaml.org,2002:python/tuple", inert_tuple)
     try:
         stat = path.lstat()
-        if not stat.is_file() or path.is_symlink() or not 0 < stat.st_size <= MAX_CONFIG_BYTES:
+        if not path.is_file() or path.is_symlink() or not 0 < stat.st_size <= MAX_CONFIG_BYTES:
             raise ValueError("Configuration must be a regular YAML file under 512 KiB.")
         with path.open("r", encoding="utf-8") as stream:
             config = yaml.load(stream, Loader=SafeTupleLoader)
@@ -80,7 +80,7 @@ def read_roformer_profile(
         raise WorkerError("model-not-found", "Choose the model.safetensors and companion config.yaml in one local model folder.")
     try:
         stat = checkpoint.lstat()
-        if not stat.is_file() or checkpoint.is_symlink() or not 1024 <= stat.st_size <= MAX_WEIGHTS_BYTES:
+        if not checkpoint.is_file() or checkpoint.is_symlink() or not 1024 <= stat.st_size <= MAX_WEIGHTS_BYTES:
             raise ValueError("Checkpoint must be a regular safetensors file between 1 KiB and 6 GiB.")
         with checkpoint.open("rb") as stream:
             header_size = struct.unpack("<Q", stream.read(8))[0]
