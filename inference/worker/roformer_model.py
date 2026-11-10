@@ -122,13 +122,24 @@ def read_roformer_profile(
     if stem_count == 4 and set(instruments) == {"vocals", "drums", "bass", "other"} and len(instruments) == 4:
         if target is not None:
             raise WorkerError("architecture-unsupported", "Four-stem RoFormer must not use a single training target.")
-    elif stem_count == 1 and set(instruments) in ({"vocals", "other"}, {"vocals", "instrumental"}):
-        if target is None or str(target).lower() not in ("vocals", "instrumental"):
-            raise WorkerError("architecture-unsupported", "Two-stem RoFormer requires a known vocals or instrumental target.")
+    elif stem_count in (1, 2) and len(instruments) == 2 and set(instruments) in (
+        {"vocals", "other"}, {"vocals", "instrumental"}
+    ):
+        if stem_count == 1 and (target is None or
+            str(target).lower() not in ("vocals", "instrumental", "other")):
+            raise WorkerError("architecture-unsupported", "Single-target RoFormer must identify its vocal or instrumental target.")
+        if stem_count == 2 and target is not None:
+            raise WorkerError("architecture-unsupported", "Two-output RoFormer must not set a single training target.")
     else:
         raise WorkerError("architecture-unsupported", "This model's denoise/dereverb/custom stems need a dedicated output contract; not mislabeled as vocals.")
 
-    profile = RoformerProfile(detected, sample_rate, channels, chunk, overlap, instruments, dict(model), None if target is None else str(target).lower())
+    # MSST calls instrumental residual "other" in some model cards. Map it
+    # explicitly, rather than assuming it means an arbitrary vocal output.
+    normalized_target = None if target is None else str(target).lower()
+    if normalized_target == "other":
+        normalized_target = "instrumental"
+    profile = RoformerProfile(detected, sample_rate, channels, chunk, overlap,
+                              instruments, dict(model), normalized_target)
     if requested_stems is not None and (
         len(requested_stems) != len(profile.stems) or set(requested_stems) != set(profile.stems)
     ):
