@@ -60,16 +60,26 @@ local/
   are prohibited.
 - RoFormer CPU preview limits inputs to 30 seconds and 256 MiB while memory
   behavior is measured. Large checkpoints may still exceed available RAM.
-- The currently bundled upstream `BS-RoFormer==1.4.0` implementation may not
-  match every MSST-derived checkpoint or config. A mismatch fails closed with
-  an architecture error. Do **not** rename, convert, or discard your weights to
-  circumvent this; the next compatibility pass must validate the specific
-  model tensors against the matching source architecture.
-- The Windows CI synthetic inference test generates original tiny weights
-  and verifies the packaged CPU worker. It does *not* prove the actual,
-  privately held checkpoints have compatible key names/shapes or good music
-  separation quality. Model-backed Windows validation on your own authorized
-  files remains a release gate.
+- Vocalizer bundles an MIT-licensed MSST-compatible inference architecture
+  alongside `BS-RoFormer==1.4.0`. Converted MSST models use the matching
+  original topology, including `mlp_expansion_factor: 2` where specified.
+  Modern upstream-only architecture settings use the corresponding upstream
+  class instead. See `inference/worker/msst_roformer/LICENSE` for the retained
+  copyright and license.
+- Some converted checkpoints may still use a different key namespace or custom
+  model head that is **not** implemented. A strict state-dict mismatch is
+  reported explicitly; Vocalizer never loads only a subset of the weights.
+  Do **not** rename, convert, or discard your weights to circumvent this.
+  Loading the actual checkpoint on your Windows computer remains necessary
+  before saying that variant works.
+- Windows CI generates original small MSST BS-RoFormer and Mel-Band
+  RoFormer safetensors checkpoints, then verifies real model inference through
+  the packaged worker, the two possible single-target output shapes, and
+  decoded audio files. These *synthetic* checks do **not** prove that your
+  actual checkpoints have compatible tensor names/shapes or good music
+  separation quality. Test those files locally before a public release.
+- FFmpeg decoding is capped before buffers are collected, limiting the
+  preview to 30 seconds. This is not yet a full-song streaming release.
 
 ## Troubleshooting
 
