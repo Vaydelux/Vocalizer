@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
+import sys
 
 def run(argv: list[str], *, env=None, timeout=180):
     result = subprocess.run(argv, capture_output=True, text=True, env=env, timeout=timeout)
@@ -28,7 +29,10 @@ def main():
     parser.add_argument("--ffmpeg", required=True)
     parser.add_argument("--ffprobe", required=True)
     args = parser.parse_args()
-    from bs_roformer import MelBandRoformer
+    # Test the actual MSST architecture used by the user's converted models,
+    # not just the generic upstream model exercised by older smoke checks.
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "inference" / "worker"))
+    from msst_roformer import MelBandRoformer
     from safetensors.torch import save_file
     import torch
 
@@ -47,6 +51,9 @@ def main():
             "sample_rate": 8000, "dim_freqs_in": 65,
             "stft_n_fft": 128, "stft_hop_length": 32, "stft_win_length": 128,
             "mask_estimator_depth": 1,
+            "mlp_expansion_factor": 2,
+            "use_torch_checkpoint": False,
+            "skip_connection": False,
         }
         import inspect
         signature = inspect.signature(MelBandRoformer.__init__).parameters
@@ -65,6 +72,9 @@ def main():
             "sample_rate": 8000, "dim_freqs_in": 65,
             "stft_n_fft": 128, "stft_hop_length": 32, "stft_win_length": 128,
             "mask_estimator_depth": 1,
+            "mlp_expansion_factor": 2,
+            "use_torch_checkpoint": False,
+            "skip_connection": False,
         }
         # Only include CPU-safe architectural parameters supported by this version.
         model_config = {k:v for k,v in model_config.items() if k in signature}
@@ -103,7 +113,7 @@ def main():
             file_path = Path(item["path"])
             if not file_path.is_file() or file_path.stat().st_size < 1000:
                 raise AssertionError(f"Missing or empty RoFormer output: {item}")
-        print("Packaged CPU RoFormer synthesized two nonempty, FFprobe-validated stems.")
+        print("Packaged CPU MSST RoFormer (MLP expansion=2) generated two FFprobe-verified stems.")
     finally:
         shutil.rmtree(root, ignore_errors=True)
 
