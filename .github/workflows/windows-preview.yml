@@ -161,6 +161,11 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "The selected FFprobe binary failed validation" }
           Get-FileHash resources/binaries/ffmpeg.exe -Algorithm SHA256 | Format-List
           Get-FileHash resources/binaries/ffprobe.exe -Algorithm SHA256 | Format-List
+      - name: Verify RoFormer shared-gain 24-bit PCM stem balance
+        shell: pwsh
+        run: |
+          python scripts/smoke-roformer-levels.py --ffmpeg resources/binaries/ffmpeg.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Verify actual packaged CPU RoFormer safetensors inference
         shell: pwsh
         timeout-minutes: 8
