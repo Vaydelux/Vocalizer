@@ -61,6 +61,13 @@ class SeparatorService:
             return separate_demucs(model_id, model_path, input_path, output_dir,
                                    requested_stems, output_format, device, profile, on_progress,
                                    mp3_bitrate=mp3_bitrate)
+        if architecture in ("bs-roformer", "melband-roformer"):
+            from roformer_service import separate_roformer
+            return separate_roformer(
+                model_id, model_path, config_path, architecture,
+                input_path, output_dir, requested_stems, output_format,
+                device, profile, on_progress, mp3_bitrate=mp3_bitrate,
+            )
         if architecture != "mdx-net":
             raise WorkerError("architecture-unsupported", "This model architecture is not integrated.")
         if device not in ("cpu", "auto"):
