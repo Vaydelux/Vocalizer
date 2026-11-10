@@ -403,7 +403,7 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
         : req.architecture === "mdx-net" ? [twoStems]
         : req.architecture === "bs-roformer" || req.architecture === "melband-roformer"
           ? [twoStems, fourStems] : [];
-      const actual = new Set(req.requestedStems);
+      const actual = new Set<string>(req.requestedStems);
       if (!sets.some(stems => stems.length === req.requestedStems.length &&
           stems.every(stem => actual.has(stem)))) {
         throw studioError("ARCHITECTURE_UNSUPPORTED", "Select the two or four exact stems supported by this model.");
