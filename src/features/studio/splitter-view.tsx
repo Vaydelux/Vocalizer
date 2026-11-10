@@ -194,19 +194,6 @@ export function SplitterView() {
     return () => window.removeEventListener("focus", onFocus);
   }, [refreshRuntime]);
 
-  const toggleStem = (stem: ModelStem) => {
-    // The worker requires the complete set for each architecture.
-    // Only the exact four-stem or vocal/instrumental set in the YAML is valid.
-    return;
-    if (selectedStems.includes(stem)) {
-      if (selectedStems.length > 1) {
-        setSelectedStems(selectedStems.filter((s) => s !== stem));
-      }
-    } else {
-      setSelectedStems([...selectedStems, stem]);
-    }
-  };
-
   async function chooseCustomModel() {
     const api = native();
     if (!api) return;
@@ -481,7 +468,7 @@ export function SplitterView() {
                           <Checkbox
                             disabled
                             checked={checked}
-                            onCheckedChange={() => toggleStem(stem)}
+
                           />
                           <span>{stem}</span>
                         </label>
