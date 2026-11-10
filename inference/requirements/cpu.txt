@@ -31,3 +31,9 @@ six
 requests
 tqdm
 soundfile
+
+# Local-only RoFormer safetensors + MSST-style YAML support.
+# CPU processing is deliberately bounded; checkpoint bytes are never bundled.
+BS-RoFormer==1.4.0
+safetensors>=0.4.5,<1.0
+PyYAML>=6.0.2,<7.0
