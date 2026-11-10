@@ -74,7 +74,7 @@ class LocalRoformerTests(unittest.TestCase):
         cfg = cfg.replace("num_stems: 1", "num_stems: 4")
         cfg = cfg.replace("instruments: [vocals, other]", "instruments: [drums, bass, other, vocals]")
         cfg = cfg.replace("target_instrument: vocals", "target_instrument: null")
-        cfg = cfg.replace("  depth: 1", "  depth: 1\\n  mlp_expansion_factor: 2\\n  use_torch_checkpoint: false\\n  skip_connection: false")
+        cfg = cfg.replace("  depth: 1", "  depth: 1\n  mlp_expansion_factor: 2\n  use_torch_checkpoint: false\n  skip_connection: false")
         with tempfile.TemporaryDirectory() as work:
             cp, yaml = fake_pair(Path(work), cfg)
             profile = read_roformer_profile(str(cp), str(yaml), "bs-roformer",
