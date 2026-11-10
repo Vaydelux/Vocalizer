@@ -100,7 +100,10 @@ def _decode_source(input_path: str, profile: RoformerProfile, duration: float):
     import numpy as np
     executable = os.environ.get("LAS_FFMPEG_PATH", "ffmpeg")
     args = [executable, "-hide_banner", "-loglevel", "error", "-nostdin",
-            "-i", input_path, "-map", "0:a:0", "-vn",
+            "-i", input_path, "-map", "0:a:0",
+            # Bound output at the decoder, not after capture_output has already
+            # accumulated potentially unbounded media bytes in process memory.
+            "-t", str(MAX_INPUT_SECONDS + 0.1), "-vn",
             "-ar", str(profile.sample_rate), "-ac", str(profile.channels),
             "-f", "f32le", "-acodec", "pcm_f32le", "pipe:1"]
     max_frames = math.ceil(MAX_INPUT_SECONDS * profile.sample_rate)
@@ -142,9 +145,14 @@ def _model_outputs(model, mixture, profile: RoformerProfile):
             names = {"vocals": "Vocals", "instrumental": "Instrumental", "other": "Instrumental"}
             return {names[name]: result[0, index]
                     for index, name in enumerate(profile.instruments)}
-        if result.ndim != 3 or result.shape[:2] != (1, profile.channels):
+        # MSST BS-RoFormer returns [batch, 1, channels, frames] even for a
+        # single target, whereas MSST MelBand returns [batch, channels, frames].
+        if result.ndim == 4 and result.shape[:3] == (1, 1, profile.channels):
+            target = result[0, 0]
+        elif result.ndim == 3 and result.shape[:2] == (1, profile.channels):
+            target = result[0]
+        else:
             raise WorkerError("inference-failed", f"Unexpected single-target RoFormer tensor shape: {result.shape}.")
-        target = result[0]
         if profile.target == "vocals":
             return {"Vocals": target, "Instrumental": mixture - target}
         if profile.target == "instrumental":
