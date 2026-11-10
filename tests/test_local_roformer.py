@@ -11,7 +11,7 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "inference" / "worker"))
 from errors import WorkerError
 from roformer_model import read_roformer_profile
-from roformer_service import model_init_kwargs
+from roformer_service import model_init_kwargs, roformer_backend
 
 BASE_CONFIG = """audio:
   chunk_size: 8000
@@ -68,6 +68,40 @@ class LocalRoformerTests(unittest.TestCase):
             self.assertEqual(p.instruments, ("drums", "bass", "other", "vocals"))
             with self.assertRaises(WorkerError):
                 read_roformer_profile(str(checkpoint), str(config), "melband-roformer")
+
+    def test_msst_multistem_expansion_two_is_preserved(self):
+        cfg = BASE_CONFIG.replace("num_bands: 8", "freqs_per_bands: !!python/tuple [2, 2, 2, 2]")
+        cfg = cfg.replace("num_stems: 1", "num_stems: 4")
+        cfg = cfg.replace("instruments: [vocals, other]", "instruments: [drums, bass, other, vocals]")
+        cfg = cfg.replace("target_instrument: vocals", "target_instrument: null")
+        cfg = cfg.replace("  depth: 1", "  depth: 1\\n  mlp_expansion_factor: 2\\n  use_torch_checkpoint: false\\n  skip_connection: false")
+        with tempfile.TemporaryDirectory() as work:
+            cp, yaml = fake_pair(Path(work), cfg)
+            profile = read_roformer_profile(str(cp), str(yaml), "bs-roformer",
+                                            ["Vocals", "Drums", "Bass", "Other"])
+            self.assertEqual(roformer_backend(profile), "msst")
+            class FakeMSSTModel:
+                def __init__(self, dim, depth, stereo, num_stems, freqs_per_bands,
+                             mlp_expansion_factor=4, use_torch_checkpoint=False,
+                             skip_connection=False):
+                    pass
+            params = model_init_kwargs(profile, FakeMSSTModel)
+            self.assertEqual(params["mlp_expansion_factor"], 2)
+            self.assertFalse(params["use_torch_checkpoint"])
+            self.assertFalse(params["skip_connection"])
+
+    def test_instrumental_other_target_and_real_two_output_heads(self):
+        instrumental = BASE_CONFIG.replace("target_instrument: vocals", "target_instrument: other")
+        with tempfile.TemporaryDirectory() as work:
+            cp, config = fake_pair(Path(work), instrumental)
+            p = read_roformer_profile(str(cp), str(config), "melband-roformer")
+            self.assertEqual(p.target, "instrumental")
+            two = instrumental.replace("num_stems: 1", "num_stems: 2")
+            two = two.replace("target_instrument: other", "target_instrument: null")
+            config.write_text(two, encoding="utf-8")
+            p2 = read_roformer_profile(str(cp), str(config), "melband-roformer")
+            self.assertEqual(p2.model_kwargs["num_stems"], 2)
+            self.assertIsNone(p2.target)
 
     def test_refuses_wrong_stem_set(self):
         with tempfile.TemporaryDirectory() as work:
