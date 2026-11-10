@@ -36,6 +36,8 @@ jobs:
         run: bun run typecheck:electron
       - name: Studio TypeScript unit tests
         run: bun run test
+      - name: Install safe local-model YAML parser
+        run: python -m pip install "PyYAML>=6.0.2,<7"
       - name: Verify Python syntax
         run: python -m compileall -q inference/worker scripts/verify-separation.py
       - name: Worker protocol and cancellation tests
