@@ -26,6 +26,12 @@ MAX_INPUT_BYTES = 256 * 1024 * 1024
 IGNORABLE_DEFAULTS = {
     "use_torch_checkpoint": False,
     "skip_connection": False,
+    # MSST config contains a disabled linear transformer even in BS models.
+    # Ignoring zero is equivalent to omitting that optional block.
+    "linear_transformer_depth": 0,
+    # Upstream MaskEstimator defaults to 4; only this identical value is safe
+    # to ignore when the constructor lacks an explicit expansion option.
+    "mlp_expansion_factor": 4,
 }
 
 def model_init_kwargs(profile: RoformerProfile, model_class) -> dict:
