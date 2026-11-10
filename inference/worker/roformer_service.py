@@ -71,6 +71,24 @@ def model_init_kwargs(profile: RoformerProfile, model_class) -> dict:
             "model weights were not loaded and nothing was exported.",
         )
     params = {key: value for key, value in profile.model_kwargs.items() if key in accepted}
+
+    # YAML sequences are normally parsed as lists; both MSST and upstream
+    # model constructors declare these frequency settings as integer tuples
+    # and validate their runtime types with beartype. Convert only known
+    # tuple-valued configuration keys, preserving all actual dimensions.
+    for key in ("freqs_per_bands", "multi_stft_resolutions_window_sizes"):
+        if key not in params:
+            continue
+        value = params[key]
+        if not isinstance(value, (list, tuple)) or not 1 <= len(value) <= 8192 or any(
+            type(item) is not int or not 1 <= item <= 131072 for item in value
+        ):
+            raise WorkerError(
+                "model-corrupted", f"RoFormer {key} must be a nonempty sequence of positive integer frequencies."
+            )
+        if key == "freqs_per_bands" and len(value) < 2:
+            raise WorkerError("model-corrupted", "BS-RoFormer needs at least two frequency bands.")
+        params[key] = tuple(value)
     # Modern upstream builds default to multistream hyperconnections, unlike
     # older MSST checkpoints. A strict safetensors load below will still reject
     # any actual parameter-shape mismatch instead of silently adapting weights.

@@ -1,4 +1,6 @@
-# MIT-licensed upstream source from ZFTurbo/Music-Source-Separation-Training\n# Original copyright (c) 2024 Roman Solovyev; see adjacent LICENSE.\nfrom functools import wraps
+# MIT-licensed upstream source from ZFTurbo/Music-Source-Separation-Training
+# Original copyright (c) 2024 Roman Solovyev; see adjacent LICENSE.
+from functools import wraps
 from packaging import version
 from collections import namedtuple
 
