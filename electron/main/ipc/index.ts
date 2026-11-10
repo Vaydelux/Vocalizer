@@ -83,7 +83,34 @@ const VERIFIED_MDX_SIZE = 59074342;
 const VERIFIED_DEMUCS_NAME = "955717e8-8726e21a.th";
 const VERIFIED_DEMUCS_SHA256 = "8726e21a993978c7ba086d3872e7608d7d5bfca646ca4aca459ffda844faa8b4";
 
-async function verifyLocalModel(modelId: string, modelPath: string, architecture: string): Promise<void> {
+async function verifyLocalModel(
+  modelId: string, modelPath: string, architecture: string, configPath?: string,
+): Promise<void> {
+  // RoFormer checkpoints are user-owned, not hash-pinned to a single model.
+  // Require a regular model.safetensors with a sibling config.yaml, then let
+  // Python safely validate the tensor header and YAML architecture/outputs.
+  if (architecture === "bs-roformer" || architecture === "melband-roformer") {
+    if (!path.isAbsolute(modelPath) || modelId !== "model.safetensors" ||
+        path.basename(modelPath) !== "model.safetensors" ||
+        !configPath || !path.isAbsolute(configPath) ||
+        configPath !== path.join(path.dirname(modelPath), "config.yaml")) {
+      throw studioError("MISSING_FILE", "Choose model.safetensors with its sibling config.yaml.");
+    }
+    try {
+      const [weights, config] = await Promise.all([
+        fs.promises.lstat(modelPath), fs.promises.lstat(configPath),
+      ]);
+      if (!weights.isFile() || weights.isSymbolicLink() ||
+          !config.isFile() || config.isSymbolicLink() ||
+          weights.size < 1024 || weights.size > 6 * 1024 ** 3 ||
+          config.size < 1 || config.size > 512 * 1024) {
+        throw new Error("Invalid model/config size or file type");
+      }
+    } catch {
+      throw studioError("MODEL_CORRUPTED", "Local safetensors/config.yaml pair is missing, linked or exceeds safe size limits.");
+    }
+    return;
+  }
   const approved = architecture === "mdx-net"
     ? { name: VERIFIED_MDX_NAME, sha256: VERIFIED_MDX_SHA256, size: VERIFIED_MDX_SIZE }
     : architecture === "demucs"
@@ -370,17 +397,21 @@ export function registerIpcHandlers(getMainWindow: () => BrowserWindow | null): 
     const req = inferenceSeparateRequestSchema.parse(raw);
     let scratch: string | null = null;
     try {
-      const expectedStems: string[] = req.architecture === "demucs"
-        ? ["Vocals", "Drums", "Bass", "Other"]
-        : ["Vocals", "Instrumental"];
-      if (req.requestedStems.length !== expectedStems.length ||
-          !expectedStems.every(stem => new Set<string>(req.requestedStems).has(stem))) {
-        throw studioError("ARCHITECTURE_UNSUPPORTED", "The model requires its complete supported stem set.");
+      const twoStems = ["Vocals", "Instrumental"];
+      const fourStems = ["Vocals", "Drums", "Bass", "Other"];
+      const sets = req.architecture === "demucs" ? [fourStems]
+        : req.architecture === "mdx-net" ? [twoStems]
+        : req.architecture === "bs-roformer" || req.architecture === "melband-roformer"
+          ? [twoStems, fourStems] : [];
+      const actual = new Set<string>(req.requestedStems);
+      if (!sets.some(stems => stems.length === req.requestedStems.length &&
+          stems.every(stem => actual.has(stem)))) {
+        throw studioError("ARCHITECTURE_UNSUPPORTED", "Select the two or four exact stems supported by this model.");
       }
       if (!["auto", "cpu"].includes(req.device)) {
         throw studioError("ARCHITECTURE_UNSUPPORTED", "Only local CPU inference is supported.");
       }
-      await verifyLocalModel(req.modelId, req.modelPath, req.architecture);
+      await verifyLocalModel(req.modelId, req.modelPath, req.architecture, req.configPath);
       const root = inferenceScratchBase(app.getPath("userData"));
       await fs.promises.mkdir(root, { recursive: true });
       scratch = await fs.promises.mkdtemp(path.join(root, "job-"));

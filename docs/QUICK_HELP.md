@@ -43,7 +43,7 @@ only code/artifacts you trust from the repository's successful CI.
 | **Recorder** | Input device = mic selection; Start = permission prompt; Meter = approximate levels; Pause/Resume; Stop = final take; Save original = captured container; Export WAV/MP3 = conversion job | Select mic → record → stop → preview → save |
 | **Karaoke** | Instrumental = backing track; Import LRC = timestamped lyrics; Offset = lyric timing; Start/Stop = microphone; Save take = raw recording; Mix format = combined output; Export mix = native FFmpeg | Import backing track → optional LRC → record → save take → export mix |
 | **Remover** | Check runtime = worker presence, not model readiness; Choose model = exact verified local ONNX; Lower memory = 128 segments; Balanced = baseline 256; Thorough = overlap 0.50, not guaranteed better; Start = real CPU separation; Preview = stem player; Show folder = Explorer | Import → choose model → select profile/output folder → Start → listen to both stems |
-| **Splitter** | Stem layout / result slots = metadata/placeholders ONLY | **Not operational:** four/six-stem inference is not shipped. |
+| **Splitter** | Local Mel-Band/BS-RoFormer safetensors model presets, paired YAML; HTDemucs/MDX options; completed stem routing | Import short input → select correct RoFormer family/2- or 4-stem layout → choose model.safetensors with config.yaml next to it → CPU → Start; unsupported model tensor layouts report a real error |
 | **Model Manager** | Inspect = metadata/hash; Associated config = optional metadata; Register = metadata only; Validate manifest = schema only; Catalog Download = disabled; Preferred = future registry resolution | Use Remover for real MDX execution; do not confuse registration with installation |
 | **Processing Queue** | Queued/Running = job state; Indeterminate = no numeric progress; Cancel = request stop; Completed = output; Logs = error history; Clear = UI history; Previous sessions = receipts only | Check progress → save output → inspect logs if failed |
 | **Settings** | Theme/Accent = appearance; Volume = playback; WAV16/24 = PCM; MP3 bitrate = file size/quality tradeoff; Sample rate = resample; Concurrency = resource usage; Model fallback policy = currently inactive | Pick preferred appearance/output defaults |
@@ -52,7 +52,7 @@ only code/artifacts you trust from the repository's successful CI.
 
 ## 4. What the buttons cannot guarantee
 
-- **AI:** The included CPU worker and two-stem MDX inference require a user-provided checksum-verified checkpoint. Model Manager registrations do not turn other models into executable backends. **Demucs and RoFormer are not installed engines**.
+- **AI:** Models stay local and are not bundled. MDX/HTDemucs require approved checkpoint hashes; RoFormer needs paired safetensors/YAML. Model Manager registrations do not turn unsupported architectures into installed engines. RoFormer is an experimental local safetensors CPU engine with strict checkpoint compatibility and a 30-second input cap; HTDemucs 4-stem CPU inference is implemented with verified local checkpoints.
 - **Quality profiles:** Lower memory, Balanced and Thorough only tune MDX inference parameters; they do not automatically improve SI-SDR or deliver studio-quality audio.
 - **Offline benchmarking:** `scripts/benchmark-separation.py` can measure reference-based SI-SDR if you provide **genuine clean reference stems**. Without ground truth, reconstruction SNR cannot establish separation quality.
 - **Sessions:** Imported tracks, editing history and incomplete jobs do not form a persistent project. Previous-session job receipts are **read-only**, not a resume function.
@@ -75,7 +75,7 @@ only code/artifacts you trust from the repository's successful CI.
 | Job stuck or failed | Open Queue → job logs; retry with a short audio source and new writable destination |
 | Can't separate vocals | Check CPU worker status in Remover, exact model filename/size/hash, output permissions and free RAM |
 | AI is very slow | Start with a short clip and Lower memory; compare CPU, RAM and output; model processing time is hardware dependent |
-| Splitter / arbitrary model unusable | Expected for this preview; not yet an implemented inference workflow |
+| RoFormer incompatible checkpoint | Choose a model.safetensors and sibling config.yaml from the same model family. Strict tensor compatibility may require an additional version-matched adapter; do not rename weights |
 | Work gone after restart | Imports are session-only. Re-import original files; recover saved outputs separately. Job receipts are status history only |
 
 ## 7. Release acceptance — do not skip

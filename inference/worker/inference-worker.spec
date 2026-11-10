@@ -27,6 +27,10 @@ datas = [
 datas += collect_data_files("onnxruntime")
 datas += collect_data_files("audio_separator")
 datas += collect_data_files("demucs")
+datas += collect_data_files("bs_roformer")
+# MSST architecture is MIT-licensed and locally vendored. Ship the license
+# beside the worker whenever the implementation is packaged.
+datas += [(os.path.join(SPECPATH, "msst_roformer", "LICENSE"), "licenses/msst-roformer")]
 
 binaries = []
 binaries += collect_dynamic_libs("onnxruntime")
@@ -49,6 +53,17 @@ hiddenimports = [
     "demucs.repo",
     "demucs.htdemucs",
     "demucs_service",
+    "roformer_model",
+    "roformer_service",
+    "bs_roformer",
+    "bs_roformer.bs_roformer",
+    "bs_roformer.mel_band_roformer",
+    "msst_roformer",
+    "msst_roformer.bs_roformer",
+    "msst_roformer.mel_band_roformer",
+    "msst_roformer.attend",
+    "safetensors",
+    "safetensors.torch",
     "torchaudio",
     "yaml",
     "torch",

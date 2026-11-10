@@ -54,7 +54,7 @@ import { toast } from "sonner";
 interface ModelPreset {
   id: string;
   name: string;
-  architecture: "demucs" | "bs-roformer" | "mdx-net";
+  architecture: "demucs" | "bs-roformer" | "melband-roformer" | "mdx-net";
   defaultStems: ModelStem[];
   description: string;
   defaultFile: string;
@@ -70,12 +70,36 @@ const MODEL_PRESETS: ModelPreset[] = [
     defaultFile: "955717e8-8726e21a.th",
   },
   {
-    id: "bs-roformer",
-    name: "BS-RoFormer (High-Fidelity 4-Stem)",
+    id: "mel-band-roformer-vocals",
+    name: "Mel-Band RoFormer — Local Vocals",
+    architecture: "melband-roformer",
+    defaultStems: ["Vocals", "Instrumental"],
+    description: "Use your own paired model.safetensors + config.yaml. CPU preview processes up to 30 seconds; incompatible model weights fail explicitly.",
+    defaultFile: "model.safetensors",
+  },
+  {
+    id: "bs-roformer-vocals",
+    name: "BS-RoFormer — Local Vocals",
     architecture: "bs-roformer",
     defaultStems: ["Vocals", "Instrumental"],
-    description: "RoFormer architecture (not yet integrated into the local worker).",
-    defaultFile: "bs_roformer_ep_317_sdr_12.97.ckpt",
+    description: "Use your own two-stem model.safetensors and config.yaml, without uploading or downloading checkpoint weights.",
+    defaultFile: "model.safetensors",
+  },
+  {
+    id: "bs-roformer-multistem",
+    name: "BS-RoFormer — Local 4-Stem",
+    architecture: "bs-roformer",
+    defaultStems: ["Vocals", "Drums", "Bass", "Other"],
+    description: "Four-stem CPU preview; requires a matching multistem YAML and safetensors checkpoint. Very large models may be unsupported.",
+    defaultFile: "model.safetensors",
+  },
+  {
+    id: "mel-band-roformer-multistem",
+    name: "Mel-Band RoFormer — Local 4-Stem",
+    architecture: "melband-roformer",
+    defaultStems: ["Vocals", "Drums", "Bass", "Other"],
+    description: "For local 4-stem MelBand YAML pairs; checked by the CPU worker before processing.",
+    defaultFile: "model.safetensors",
   },
   {
     id: "mdx-net-hq5",
@@ -103,7 +127,7 @@ export function SplitterView() {
   const enqueue = useJobs((s) => s.enqueue);
   const addLane = useMixer((s) => s.addLane);
 
-  const [selectedPresetId, setSelectedPresetId] = useState<string>("mdx-net-hq5");
+  const [selectedPresetId, setSelectedPresetId] = useState<string>("mel-band-roformer-vocals");
   const selectedPreset = MODEL_PRESETS.find((p) => p.id === selectedPresetId) ?? MODEL_PRESETS[0];
 
   const [selectedStems, setSelectedStems] = useState<ModelStem[]>(selectedPreset.defaultStems);
@@ -170,18 +194,6 @@ export function SplitterView() {
     return () => window.removeEventListener("focus", onFocus);
   }, [refreshRuntime]);
 
-  const toggleStem = (stem: ModelStem) => {
-    // The worker requires the complete set for each architecture.
-    if (selectedPreset.architecture === "mdx-net" || selectedPreset.architecture === "demucs") return;
-    if (selectedStems.includes(stem)) {
-      if (selectedStems.length > 1) {
-        setSelectedStems(selectedStems.filter((s) => s !== stem));
-      }
-    } else {
-      setSelectedStems([...selectedStems, stem]);
-    }
-  };
-
   async function chooseCustomModel() {
     const api = native();
     if (!api) return;
@@ -189,7 +201,7 @@ export function SplitterView() {
     try {
       const files = await api.openFiles({
         multiple: false,
-        filters: [{ name: "Neural Checkpoints", extensions: ["onnx", "ckpt", "pt", "th"] }],
+        filters: [{ name: "Local Neural Checkpoints", extensions: ["safetensors", "onnx", "th"] }],
       });
       if (!files?.length) return;
       if (files[0].split(/[\\/]/).pop() !== selectedPreset.defaultFile) {
@@ -204,10 +216,7 @@ export function SplitterView() {
 
   function startSeparation() {
     if (!track || !workerDetected || activeInference) return;
-    if (selectedPreset.architecture === "bs-roformer") {
-      toast.error("This separation architecture is not enabled in the current CPU worker.");
-      return;
-    }
+
     if (!localModelPath) {
       setModelError("Select the approved local checkpoint. Models are never bundled or downloaded.");
       return;
@@ -223,6 +232,9 @@ export function SplitterView() {
         preferredModelId: null,
         modelId: selectedPreset.defaultFile,
         architecture: selectedPreset.architecture,
+        configPath: selectedPreset.defaultFile === "model.safetensors"
+          ? modelPath.replace(/[\\/][^\\/]+$/, (suffix) => suffix[0] + "config.yaml")
+          : undefined,
         device,
         outputFormat: exportFormat as ExportFormat,
         mp3Bitrate,
@@ -298,7 +310,7 @@ export function SplitterView() {
     <div className="space-y-5">
       <PageHeader
         title="Stem Splitter"
-        description="Offline two-stem MDX-Net or four-stem HTDemucs CPU processing with separately selected and integrity-checked local checkpoints."
+        description="Offline MDX-Net, HTDemucs or local RoFormer safetensors with their paired configurations; no model downloads."
         actions={
           <div className="flex items-center gap-2">
             <Button
@@ -338,7 +350,7 @@ export function SplitterView() {
           {checkingRuntime ? "Checking inference runtime…" : workerDetected ? "Python inference worker detected" : "Inference worker unavailable"}
         </span>
         <span className="rounded-full border border-border px-2.5 py-1 text-muted-foreground">
-          2-Stem MDX CPU Available; 4-Stem Planned
+          MDX / Demucs / RoFormer CPU preview
         </span>
         <span className="rounded-full border border-border px-2.5 py-1 text-muted-foreground">
           Hardware: CPU / CUDA / DirectML
@@ -392,7 +404,7 @@ export function SplitterView() {
                     </SelectTrigger>
                     <SelectContent>
                       {MODEL_PRESETS.map((preset) => (
-                        <SelectItem key={preset.id} value={preset.id} disabled={preset.architecture === "bs-roformer"} className="text-xs">
+                        <SelectItem key={preset.id} value={preset.id}  className="text-xs">
                           {preset.name}
                         </SelectItem>
                       ))}
@@ -456,7 +468,7 @@ export function SplitterView() {
                           <Checkbox
                             disabled
                             checked={checked}
-                            onCheckedChange={() => toggleStem(stem)}
+
                           />
                           <span>{stem}</span>
                         </label>
@@ -626,7 +638,7 @@ export function SplitterView() {
                     type="button"
                     className="w-full h-10 gap-2 font-medium"
                     onClick={startSeparation}
-                    disabled={!workerDetected || Boolean(activeInference) || checkingRuntime || selectedStems.length !== selectedPreset.defaultStems.length || !localModelPath || selectedPreset.architecture === "bs-roformer"}
+                    disabled={!workerDetected || Boolean(activeInference) || checkingRuntime || selectedStems.length !== selectedPreset.defaultStems.length || !localModelPath}
                   >
                     {activeInference ? (
                       <>
