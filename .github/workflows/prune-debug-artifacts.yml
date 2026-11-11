@@ -1,0 +1,66 @@
+name: Prune obsolete Windows debug artifacts
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/prune-debug-artifacts.yml
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/prune-debug-artifacts.yml
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: vocalizer-debug-artifact-prune
+  cancel-in-progress: false
+
+jobs:
+  prune:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Inventory and safely prune superseded debug builds
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const {owner, repo} = context.repo;
+            const artifacts = await github.paginate(github.rest.actions.listArtifactsForRepo, {
+              owner, repo, per_page: 100
+            });
+            // Never delete any other repository, small diagnostics, releases, or
+            // newer builds. Only large redundant Windows debug ZIP artifacts.
+            const exactDebugName = /^Vocalizer-\d{4}-\d{2}-\d{2}-Windows-x64-Debug$/;
+            const minBytes = 400 * 1024 * 1024;
+            const debugBuilds = artifacts
+              .filter(a => !a.expired && exactDebugName.test(a.name) && a.size_in_bytes >= minBytes)
+              .sort((a,b) =>
+                new Date(b.created_at) - new Date(a.created_at) || b.id - a.id);
+            const keep = debugBuilds.slice(0, 2);
+            const obsolete = debugBuilds.slice(2);
+            const dryRun = context.eventName === 'pull_request';
+            core.info(`Found ${debugBuilds.length} matching large Windows debug artifacts.`);
+            core.info(`Keeping newest ${keep.length}; ${dryRun ? 'would delete' : 'deleting'} ${obsolete.length} superseded copies.`);
+            let freed = 0;
+            let deleted = 0;
+            for (const item of obsolete) {
+              core.info(`${dryRun ? '[DRY RUN] ' : ''}Prune artifact ${item.id}: ${item.name} (${item.size_in_bytes} bytes, ${item.created_at})`);
+              if (!dryRun) {
+                await github.rest.actions.deleteArtifact({owner, repo, artifact_id: item.id});
+                freed += item.size_in_bytes;
+                deleted += 1;
+              }
+            }
+            await core.summary
+              .addHeading('Windows Debug artifact cleanup')
+              .addTable([
+                [{data:'Category',header:true},{data:'Count',header:true}],
+                ['Matching large debug builds',String(debugBuilds.length)],
+                ['Newest retained',String(keep.length)],
+                ['Superseded selected',String(obsolete.length)],
+                ['Actually deleted',String(deleted)]
+              ])
+              .addRaw(`\n${dryRun ? 'Dry run: no deletion.' : `Requested deletion of ${(freed/1024/1024/1024).toFixed(2)} GiB of obsolete debug artifacts.`} No Releases, source files, or unrelated artifacts were touched. GitHub quota updates may take 6–12 hours.\n`)
+              .write();
