@@ -1,4 +1,4 @@
-name: Prune obsolete Windows debug artifacts
+name: Prune pre-Nov-11 workflow artifacts
 
 on:
   workflow_dispatch:
@@ -30,26 +30,30 @@ jobs:
             const artifacts = await github.paginate(github.rest.actions.listArtifactsForRepo, {
               owner, repo, per_page: 100
             });
-            // Never delete any other repository, small diagnostics, releases, or
-            // newer builds. Only large redundant Windows debug ZIP artifacts.
-            const exactDebugName = /^Vocalizer-\d{4}-\d{2}-\d{2}-Windows-x64-Debug$/;
-            const minBytes = 400 * 1024 * 1024;
-            const debugBuilds = artifacts
-              .filter(a => !a.expired && exactDebugName.test(a.name) && a.size_in_bytes >= minBytes)
-              .sort((a,b) =>
-                new Date(b.created_at) - new Date(a.created_at) || b.id - a.id);
-            const keep = debugBuilds.slice(0, 2);
-            const obsolete = debugBuilds.slice(2);
+            // User-requested account cutoff: 2026-11-11 00:00 in Asia/Manila.
+            // Preserve ALL artifact versions created at or after the cutoff,
+            // regardless of filename, size, or workflow result.
+            const cutoff = Date.parse('2026-11-10T16:00:00.000Z');
+            // Protect artifacts with a version date in their filename as
+            // well, even if metadata timestamps are unusual.
+            const protectedVersion = /(?:^|[^0-9])2026[-_.]11[-_.](?:1[1-9]|2[0-9]|30)(?:[^0-9]|$)/;
+            const obsolete = artifacts.filter(a => {
+              const created = Date.parse(a.created_at || '');
+              return !a.expired && Number.isFinite(created) &&
+                created < cutoff && !protectedVersion.test(a.name || '');
+            }).sort((a,b) => a.id - b.id);
+            const preserved = artifacts.filter(a => !obsolete.includes(a));
             const dryRun = context.eventName === 'pull_request';
-            core.info(`Found ${debugBuilds.length} matching large Windows debug artifacts.`);
-            core.info(`Keeping newest ${keep.length}; ${dryRun ? 'would delete' : 'deleting'} ${obsolete.length} superseded copies.`);
+            const selectedBytes = obsolete.reduce((sum, a) => sum + (a.size_in_bytes || 0), 0);
+            core.info(`Retention cutoff: 2026-11-11 00:00 Asia/Manila (${new Date(cutoff).toISOString()}).`);
+            core.info(`Protecting ${preserved.length} artifacts; ${dryRun ? 'would delete' : 'deleting'} ${obsolete.length} pre-cutoff artifacts (${(selectedBytes / 1073741824).toFixed(3)} GiB).`);
             let freed = 0;
             let deleted = 0;
             for (const item of obsolete) {
               core.info(`${dryRun ? '[DRY RUN] ' : ''}Prune artifact ${item.id}: ${item.name} (${item.size_in_bytes} bytes, ${item.created_at})`);
               if (!dryRun) {
                 await github.rest.actions.deleteArtifact({owner, repo, artifact_id: item.id});
-                freed += item.size_in_bytes;
+                freed += item.size_in_bytes || 0;
                 deleted += 1;
               }
             }
@@ -57,10 +61,10 @@ jobs:
               .addHeading('Windows Debug artifact cleanup')
               .addTable([
                 [{data:'Category',header:true},{data:'Count',header:true}],
-                ['Matching large debug builds',String(debugBuilds.length)],
-                ['Newest retained',String(keep.length)],
-                ['Superseded selected',String(obsolete.length)],
+                ['Artifacts inventoried',String(artifacts.length)],
+                ['Protected (November 11 onward or otherwise)',String(preserved.length)],
+                ['Older artifacts eligible',String(obsolete.length)],
                 ['Actually deleted',String(deleted)]
               ])
-              .addRaw(`\n${dryRun ? 'Dry run: no deletion.' : `Requested deletion of ${(freed/1024/1024/1024).toFixed(2)} GiB of obsolete debug artifacts.`} No Releases, source files, or unrelated artifacts were touched. GitHub quota updates may take 6–12 hours.\n`)
+              .addRaw(`\n${dryRun ? 'Dry run: no deletion.' : `Requested deletion of ${(freed/1024/1024/1024).toFixed(2)} GiB of pre-cutoff artifacts.`} No November 11 onward artifacts, Releases, source files, or Git references were touched. GitHub quota updates may take 6–12 hours.\n`)
               .write();
